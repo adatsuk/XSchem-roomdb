@@ -221,25 +221,27 @@ static int spice_netlist(FILE *fd, int spice_stop )
        } else {
          char *val = NULL;
          const char *m;
+         char *res = NULL;
          if(print_spice_element(fd, i)) {
            fprintf(fd, "**** end_element\n");
          }
          /* hash device_model attribute if any */
          my_strdup2(_ALLOC_ID_, &val, get_tok_value(xctx->inst[i].prop_ptr, "device_model", 2));
          m = val;
-         if(strchr(val, '@')) m = translate(i, val);
+         if(strchr(val, '@')) m = translate(i, val, &res);
          else m = tcl_hook2(m);
          if(m[0]) str_hash_lookup(&model_table, model_name(m), m, XINSERT);
          else {
            my_strdup2(_ALLOC_ID_, &val,
                get_tok_value(xctx->sym[xctx->inst[i].ptr].prop_ptr, "device_model", 2));
            m = val;
-           if(strchr(val, '@')) m = translate(i, val);
+           if(strchr(val, '@')) m = translate(i, val, &res);
            else m = tcl_hook2(m);
            if(m[0]) str_hash_lookup(&model_table, model_name(m), m, XINSERT);
          }
          my_free(_ALLOC_ID_, &model_name_result);
          my_free(_ALLOC_ID_, &val);
+         if(res) my_free(_ALLOC_ID_, &res);
        }
      }
     }
@@ -666,11 +668,13 @@ int spice_block_netlist(FILE *fd, int i, int alert)
   if(sym_def) {
     char *symname_attr = NULL;
     const char *translated_sym_def;
+    char *res = NULL;
     my_mstrcat(_ALLOC_ID_, &symname_attr, "symname=", get_cell(name, 0), NULL);
-    translated_sym_def = translate3(sym_def, 1, xctx->sym[i].templ, symname_attr, NULL, NULL);
+    translated_sym_def = translate3(sym_def, 1, xctx->sym[i].templ, symname_attr, NULL, NULL, &res);
     my_free(_ALLOC_ID_, &symname_attr);
     fprintf(fd, "%s\n", translated_sym_def);
     my_free(_ALLOC_ID_, &sym_def);
+    my_free(_ALLOC_ID_, &res);
   } else {
     const char *s = get_tok_value(xctx->sym[i].templ, "model",0);
     if(!s[0]) s = get_cell(sanitize(name), 0);

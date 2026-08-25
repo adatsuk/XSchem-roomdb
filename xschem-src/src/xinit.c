@@ -974,13 +974,12 @@ static void xwin_exit(void)
  clear_expandlabel_data();
  get_sym_template(NULL, NULL); /* clear static data in function */
  list_tokens(NULL, 0); /* clear static data in function */
- translate(-1, NULL); /* clear static data in function */
- translate2(NULL, 0, NULL); /* clear static data in function */
- translate3(NULL, 0, NULL, NULL, NULL, NULL); /* clear static data in function */
+ translate(-1, NULL, NULL); /* clear static data in function */
  subst_token(NULL, NULL, NULL); /* clear static data in function */
  find_nth(NULL, "", "", 0, 0); /* clear static data in function */
  trim_chars(NULL, ""); /* clear static data in function */
  tcl_hook2(NULL); /* clear static data in function */
+ spice_get_node(NULL); /* clear static data in function */
  save_ascii_string(NULL, NULL, 0); /* clear static data in function */
  eval_expr_clear_table(); /* clear expression parser data */
  dbg(1, "xwin_exit(): removing font\n");
@@ -3210,6 +3209,10 @@ int Tcl_AppInit(Tcl_Interp *inter)
    if(cli_opt_do_netlist) set_modify(-1); /* set tab/window title */
  }
  xctx->pending_fullzoom=1;
+ /* necessary if the dialog to allow tcl scripts in schematics is shown. 
+  * the dialog sets semaphore to 3 to avoid nested calls, so some ConfigureNotify events and resetwindow 
+  * calls are lost */
+ resetwin(1, 0, 0, 0, 0);
  if(has_x) tclvareval("set_geom . [xschem get current_name]", NULL);
 
  if(cli_opt_do_netlist) {

@@ -5932,11 +5932,34 @@ proc file_chooser {} {
     }
   }
   bind .ins.center.left.l <KeyPress-Return> {
-    if {$file_chooser(action) eq {load}} {
-      .ins.bottom.load invoke
+
+    proc handle_return {} {
+      global file_chooser
+      set type {}
+      set sel [lindex [.ins.center.left.l curselection] 0]
+      if {$sel ne {} && [info exists file_chooser(fullpathlist)]} {
+        set f [lindex $file_chooser(fullpathlist) $sel]
+        # puts ">>>> $f"
+        if {$f ne {}} {
+          set type [is_xschem_file $f]
+        }
+      }
+      if {$type eq {SYMBOL}} {
+        if {1} { ;#Close file browser on Return key press and place selected symbol
+          xschem place_symbol $f
+          xschem preview_window close .ins.center.right {}
+          destroy .ins
+        } else { ;# Place symbol on Return key press but leave file browser open.
+          set file_chooser(action) {symbol1} ;# only one time insert symbol
+          file_chooser_preview
+        }
+      } else {
+        .ins.bottom.load invoke
+        xschem preview_window close .ins.center.right {}
+        destroy .ins
+      }
     }
-    xschem preview_window close .ins.center.right {}
-    destroy .ins
+    handle_return
   }
   label .ins.bottom.n -text { N. of items:}
   label .ins.bottom.nitems -textvariable file_chooser(nitems)
@@ -6900,6 +6923,28 @@ proc property_search {} {
   return {}
 }
 
+# Sets some useful global vars to be sed in launcher scripts.
+proc set_xschem_vars {} {
+  global path sch_basename
+  set raw_level [xschem get raw_level]
+  set netlist_type [xschem get netlist_type]
+  set path [string range [xschem get sch_path] 1 end]
+  set sch_basename [file tail [file rootname [xschem get current_name]]]
+  # skip hierarchy components above the level where raw file has been loaded.
+  # node path names to look up in raw file begin from there.
+  set skip 0
+  while { $skip < $raw_level } {
+    regsub {^[^.]*\.} $path {} path
+    incr skip
+  }
+
+  if { $netlist_type eq {spice} } {
+    # this is necessary if spiceprefix is being used in netlists
+    regsub {^([^xX])} $path {x\1} path
+    while { [regsub {\.([^xX])} $path {.x\1} path] } {}
+  }
+}
+
 #20171029
 # allows to call TCL hooks from 'format' strings during netlisting
 # example of symbol spice format definition:
@@ -6909,23 +6954,24 @@ proc property_search {} {
 # they can be used together with TCL xschem command to query instance or symbol
 # attributes.
 #
-proc tclpropeval {s instname symname} {
-  # puts "tclpropeval: $s $instname $symname"
-  global env debug_var
+proc tclpropeval {s instn symn} {
+  # puts "tclpropeval: $s $instn $symn"
+  global env debug_var debug_tcleval instname symname
+  if {![info exists instname]} {set instname $instn}
+  if {![info exists symname]} {set symname $symn}
   regsub {^@tcleval\(} $s {} s
   regsub {\)([ \t\n]*)$} $s {\1} s
-  # puts "tclpropeval: $s $instname $symname"
-  if { [catch {subst $s} res] } {
-    # puts stderr $res
+
+  if { [catch {uplevel #0 "subst \{$s\}"} res] } {
+    if { $debug_tcleval > 0} { puts "tclpropeval warning: $s --> $res"}
     set res ?\n
   }
   return $res
 }
 
 # this hook is called in translate() if whole string is contained in a tcleval(...) construct
-proc tclpropeval2 {s} {
-  global debug_tcleval env path debug_var sch_basename
-
+proc tclpropeval2 {s {ask 1}} {
+  global debug_tcleval env path debug_var sch_basename xschem_execute_scripts has_x
   set raw_level [xschem get raw_level]
   set netlist_type [xschem get netlist_type]
   # puts "tclpropeval2: s=|$s|"
@@ -6956,9 +7002,45 @@ proc tclpropeval2 {s} {
   regsub {\)([ \n\t]*)$} $s {\1} s
   # puts "tclpropeval2: s=|$s|"
   # puts "tclpropeval2: subst $s=|[subst $s]|"
-  if { [catch {uplevel #0 "subst \{$s\}"} res] } {
-    if { $debug_tcleval > 0} { puts "tclpropeval2 warning: $s --> $res"}
+  if { $xschem_execute_scripts eq {no} } {
     set res ?\n
+    return $res
+  } elseif { $ask && $xschem_execute_scripts eq {ask}} {
+    if {[info exists has_x]} {
+      # completely disable event processing in callback()
+      # the alert box causes an Expose event, wicht triggers draw() and translate()
+      # but this procedure may be  called from within a translate() call...
+      xschem set semaphore [expr {[xschem get semaphore] + 3}]
+      set    msg " Allow xschem to execute scripts embedded in schematics?\n\n"
+      append msg " WARNING:\n"
+      append msg "   Allowing script execution is a potential security vulnerability,\n"
+      append msg "   Do it only for schematics obtained from trusted sources.\n\n"
+      append msg " To avoid this message look for variable 'xschem_execute_scripts'\n"
+      append msg " in your xschemrc file,\n"
+      append msg " set it to 'yes' to permanently ENABLE scripts,\n"
+      append msg " or set it to 'no' to permanently DISABLE scripts.\n"
+      append msg " Current (default) setting is 'ask'."
+
+      set answer [alert_ $msg {} 0 1]
+      xschem set semaphore [expr {[xschem get semaphore] - 3}]
+      # set answer [tk_messageBox -parent [xschem get topwindow] -message $msg -type yesno]
+      if {$answer  eq {1}} {
+        set xschem_execute_scripts yes
+      } elseif {$answer eq {0}} {
+        set xschem_execute_scripts no
+      }
+    } else {
+      set xschem_execute_scripts yes
+    }
+  }
+  if { $xschem_execute_scripts eq {yes} } {  
+    if { [catch {uplevel #0 "subst \{$s\}"} res] } {
+      if { $debug_tcleval > 0} { puts "tclpropeval2 warning: $s --> $res"}
+      set res ?\n
+    }
+  } else {
+    set res ?\n
+    return $res
   }
   # puts "tclpropeval2: res=|$res|"
   return $res
@@ -7241,7 +7323,7 @@ proc edit_prop {txtlabel} {
   }
   wm geometry .dialog "${edit_prop_size}+$X+$Y"
   set prev_symbol $symbol
-  set editprop_sympath [get_directory [abs_sym_path [tclpropeval2 $symbol]]]
+  set editprop_sympath [get_directory [abs_sym_path [tclpropeval2 $symbol 0]]]
   frame .dialog.f4
   label .dialog.f4.l1  -text $txtlabel
   label .dialog.f4.path  -text "Path:"
@@ -7779,7 +7861,7 @@ proc text_line {txtlabel clear {preserve_disabled disabled} } {
   tkwait window .dialog
 
   if {$preserve_disabled eq {disabled}} {
-    if {$tctx::retval ne $tctx::retval_orig} {
+    if { $tctx::rcode ne {} && $tctx::retval ne $tctx::retval_orig} {
       xschem push_undo
       xschem set_modify 1
       set glob_attr [string map {
@@ -7830,6 +7912,11 @@ proc alert_ {txtlabel {position +200+300} {nowait {0}} {yesno 0}} {
     set tctx::rcode 1
     destroy .alert
   }
+  button .alert.b3 -text Copy -command  \
+  "
+    clipboard clear
+    clipboard append [list $txtlabel]
+  "
   if {$yesno} {
     button .alert.b2 -text "No" -command  \
     {
@@ -7840,6 +7927,7 @@ proc alert_ {txtlabel {position +200+300} {nowait {0}} {yesno 0}} {
 
   pack .alert.l1 -side top -fill both -expand yes
   pack .alert.b1 -side left -fill x -expand yes
+  pack .alert.b3 -side left -fill x -expand yes
   if {$yesno} {pack .alert.b2 -side left -fill x -expand yes}
   tkwait visibility .alert
   # grab set .alert
@@ -9710,7 +9798,7 @@ set tctx::global_list {
  fix_broken_tiled_fill flat_netlist fullscreen gaw_fd gaw_tcp_address graph_autoload graph_bus
  graph_change_done graph_dialog_default_geometry graph_digital graph_legend graph_linewidth_mult
  graph_logx graph_logy graph_private_cursor graph_rainbow graph_schname graph_sel_color
- graph_sel_wave graph_selected graph_sort graph_unlocked graph_use_ctrl_key 
+ graph_sel_wave graph_selected graph_select_to_zoom graph_sort graph_unlocked graph_use_ctrl_key 
  graph_vlegend hide_empty_graphs
  hide_symbols incr_hilight incremental_select infix_interface infowindow_text intuitive_interface
  keep_symbols launcher_default_program light_colors line_width live_cursor2_backannotate
@@ -9731,7 +9819,8 @@ set tctx::global_list {
  top_is_subckt transparent_svg undo_type unselect_partial_sel_wires uppercase_subckt
  use_cursor_for_selection use_lab_wire use_label_prefix use_tclreadline user_wants_copy_cell
  verilog_2001 verilog_bitblast
- viewdata_fileid viewdata_filename viewdata_w xschem_libs xschem_listen_port zoom_full_center
+ viewdata_fileid viewdata_filename viewdata_w xschem_execute_scripts xschem_libs
+ xschem_listen_port zoom_full_center
 }
 
 ## list of global arrays to save/restore on context switching
@@ -11407,6 +11496,7 @@ set_ne uppercase_subckt 0
 set_ne lvs_ignore 0
 set_ne hide_empty_graphs 0 ;# if set to 1 waveform boxes will be hidden if no raw file loaded
 set_ne graph_use_ctrl_key 0;# if set forces to use Control key to operate on graphs
+set_ne graph_select_to_zoom 0;  #if set requires graph box to be selected to allow to zoom / pan with mouse / keys.
 set_ne spiceprefix 1
 set_ne verilog_2001 1
 set_ne verilog_bitblast 0
@@ -11551,6 +11641,7 @@ set_ne terminal xterm
 # xschem tcp port number (listen to port and execute commands from there if set)
 # set a port number in xschemrc if you want accept remote connections.
 set_ne xschem_listen_port {}
+set_ne xschem_execute_scripts ask
 
 # server for bespice waveform connection (listen to port and send commands to bespice if set)
 # set a port number in xschemrc if you want xschem to be able to cross-probe to bespice

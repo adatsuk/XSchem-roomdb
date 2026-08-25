@@ -97,6 +97,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
  Str_hashtable subckt_table = {NULL, 0};
  int lvs_ignore = tclgetboolvar("lvs_ignore");
  int save_prev_mod = xctx->prev_set_modify;
+ char *res = NULL;
 
  exit_code = 0; /* reset exit code */
  split_f = tclgetboolvar("split_files");
@@ -140,7 +141,8 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
       str_tmp = get_tok_value(xctx->sym[xctx->inst[i].ptr].prop_ptr, "verilog_format", 2);
 
    my_strdup(_ALLOC_ID_, &tmp_string, str_tmp);
-   fprintf(fd, "%s\n", str_tmp ? translate(i, tmp_string) : "<NULL>");
+   fprintf(fd, "%s\n", str_tmp ? translate(i, tmp_string, &res) : "<NULL>");
+   my_free(_ALLOC_ID_, &res);
   }
  }
 
@@ -436,6 +438,7 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
   char *name = NULL;
   int lvs_ignore = tclgetboolvar("lvs_ignore");
   const char *default_schematic;
+  char *res = NULL;
 
   split_f = tclgetboolvar("split_files");
   if(!strboolcmp( get_tok_value(xctx->sym[i].prop_ptr,"verilog_stop",0),"true") )
@@ -490,7 +493,8 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
       if(!xctx->tok_size && strcmp(fmt_attr, "verilog_format"))
          str_tmp = get_tok_value(xctx->sym[xctx->inst[j].ptr].prop_ptr, "verilog_format", 2);
       my_strdup(_ALLOC_ID_, &tmp_string, str_tmp);
-      fprintf(fd, "%s\n", str_tmp ? translate(j, tmp_string) : "<NULL>");
+      fprintf(fd, "%s\n", str_tmp ? translate(j, tmp_string, &res) : "<NULL>");
+      my_free(_ALLOC_ID_, &res);
      }
     }
 
@@ -551,7 +555,7 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
                   xctx->sym[i].rect[PINLAYER][j].prop_ptr,"verilog_type",0));
         my_strdup(_ALLOC_ID_, &port_value,
           get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr,"value", 0) );
-        my_strdup(_ALLOC_ID_, &dir_tmp, get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr,"dir",0) );
+        my_strdup2(_ALLOC_ID_, &dir_tmp, get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr,"dir",0) );
         if(strcmp(dir_tmp,"in")){
            if(!sig_type || sig_type[0]=='\0') my_strdup(_ALLOC_ID_, &sig_type,"wire"); /* 20070720 changed reg to wire */
         } else {

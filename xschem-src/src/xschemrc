@@ -536,6 +536,17 @@
 # set xschem_listen_port 2021
 
 ###########################################################################
+#### EXECUTE SCRIPTS WITH 'tcleval(...)' or '@tcleval(...)'
+###########################################################################
+#### possible values: 
+####   yes: allow scripts.
+####   no:  do not allow scripts, always return empty result.
+####   ask: (default) ask to the user if GUI is present. If no GUI is present 
+####        then allow scripts.
+#### Default: ask
+# set xschem_execute_scripts yes
+
+###########################################################################
 #### BESPICE WAVE SOCKET CONNECTION
 ###########################################################################
 #### set bespice wave listening port; default: not enabled
@@ -677,6 +688,14 @@
 #### to prevent "graph event stealing to schematic"
 #### Default: 0 (not set)
 # set graph_use_ctrl_key 1
+
+###########################################################################
+#### REQUIRE GRAPH TO BE SELECTED TO OPERATE ON IT.
+###########################################################################
+#### if enabled requires graph to be selected to allow panning / zooming 
+#### waveforms.
+#### Default: 0 (not set)
+# set graph_select_to_zoom 1
 
 ###########################################################################
 #### HIDE GRAPHS IF NO SPICE DATA LOADED

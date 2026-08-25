@@ -2,7 +2,7 @@
 
 Xschem workspace integrated with [CORE](https://github.com/IHP-GmbH/CommonDB) (CommonDB): open `.schematic.core` / `.symbol.core` in the editor, round-trip through `coretcl.so`, and Qucs symbol placeholders for cross-tool schematics.
 
-This repository is a standalone fork of the LibMan/Xschem integration layer plus a vendored [xschem](https://github.com/StefanSchippers/xschem) tree under `xschem-src/`.
+This repository is a standalone fork of the LibMan/Xschem integration layer plus a vendored [xschem](https://github.com/StefanSchippers/xschem) tree under `xschem-src/` (upstream `master`, **3.4.8RC**).
 
 ## Layout
 
