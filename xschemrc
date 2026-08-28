@@ -20,8 +20,29 @@ set ::core_payload_dir [file join $::CORE_ROOT designs xschem payload]
 set XSCHEM_LIBRARY_PATH {}
 append XSCHEM_LIBRARY_PATH :$::core_payload_dir
 append XSCHEM_LIBRARY_PATH :[file join $::XSCHEM_ROOT integrations qucs_symbols]
-append XSCHEM_LIBRARY_PATH :$env(HOME)/.local/share/xschem/xschem_library/devices
+# Schematics reference devices/lab_pin.sym — library root must be xschem_library/
+# (not the devices/ subdir alone, or devices/devices/lab_pin.sym is searched).
+foreach lib {
+  [file join $env(HOME) .local share xschem xschem_library]
+  [file join $::XSCHEM_ROOT xschem-src xschem_library]
+} {
+  if {[file isdirectory $lib]} {
+    append XSCHEM_LIBRARY_PATH :$lib
+    append XSCHEM_LIBRARY_PATH :[file join $lib devices]
+  }
+}
 append XSCHEM_LIBRARY_PATH :$env(HOME)/.local/share/doc/xschem/examples
+
+# LibMan tech primitives land here (open-xschem-wsl.sh sets XSCHEM_PRIMITIVE_CACHE per session).
+set ::core_primitive_cache [file join $::XSCHEM_ROOT integrations primitive_cache]
+if {[info exists ::env(XSCHEM_PRIMITIVE_CACHE)] && $::env(XSCHEM_PRIMITIVE_CACHE) ne ""} {
+  catch {set ::core_primitive_cache [file normalize $::env(XSCHEM_PRIMITIVE_CACHE)]}
+}
+catch {file mkdir $::core_primitive_cache}
+append XSCHEM_LIBRARY_PATH :$::core_primitive_cache
+
+# LibMan CORE files are trusted project data; avoid modal script prompt blocking startup.
+set xschem_execute_scripts yes
 
 set netlist_dir $::core_payload_dir
 

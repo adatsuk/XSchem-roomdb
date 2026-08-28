@@ -3731,6 +3731,126 @@ int load_schematic(int load_symbols, const char *fname, int reset_undo, int aler
   return ret;
 }
 
+static char *read_fp_to_buffer(FILE *fd, size_t *out_len)
+{
+  long sz;
+  char *buf;
+
+  if(fseek(fd, 0, SEEK_END) != 0) return NULL;
+  sz = ftell(fd);
+  if(sz < 0) return NULL;
+  if(fseek(fd, 0, SEEK_SET) != 0) return NULL;
+  buf = (char *)my_malloc(_ALLOC_ID_, (size_t)sz + 1);
+  if(!buf) return NULL;
+  if(sz > 0 && fread(buf, 1, (size_t)sz, fd) != (size_t)sz) {
+    my_free(_ALLOC_ID_, &buf);
+    return NULL;
+  }
+  buf[sz] = '\0';
+  if(out_len) *out_len = (size_t)sz;
+  return buf;
+}
+
+static void write_current_schematic_to_fp(FILE *fd)
+{
+  xRect *rect;
+  int rects;
+
+  unselect_all(1);
+  rects = xctx->rects[PINLAYER];
+  rect = xctx->rect[PINLAYER];
+  sort_symbol_pins(rect, rects, xctx->sch[xctx->currsch] ? xctx->sch[xctx->currsch] : "buffer");
+  write_xschem_file(fd);
+}
+
+/* Load schematic/symbol records from memory (CORE native bridge). */
+int load_schematic_from_buffer(const char *data, size_t len, const char *logical_name,
+                               int load_symbols, int reset_undo)
+{
+  FILE *fd;
+  char msg[PATH_MAX + 100];
+  int ret = 1;
+
+  if(!xctx) return 0;
+  xctx->prep_hi_structs=0;
+  xctx->prep_net_structs=0;
+  xctx->prep_hash_inst=0;
+  xctx->prep_hash_wires=0;
+  if(reset_undo) {
+    xctx->clear_undo();
+    xctx->prev_set_modify = -1;
+  } else {
+    xctx->prev_set_modify = 0;
+  }
+  clear_drawing();
+  fd = tmpfile();
+  if(!fd) return 0;
+  if(len > 0) {
+    if(fwrite(data, 1, len, fd) != len) {
+      fclose(fd);
+      return 0;
+    }
+  }
+  fflush(fd);
+  rewind(fd);
+  read_xschem_file(fd);
+  fclose(fd);
+
+  if(logical_name && logical_name[0]) {
+    my_strdup2(_ALLOC_ID_, &xctx->sch[xctx->currsch], logical_name);
+    my_snprintf(msg, S(msg), "get_directory {%s}", logical_name);
+    my_strncpy(xctx->current_dirname, tcleval(msg), S(xctx->current_dirname));
+    my_strncpy(xctx->current_name, rel_sym_path(logical_name), S(xctx->current_name));
+  }
+  if(reset_undo) {
+    xctx->time_last_modify = 0;
+    set_modify(0);
+  }
+  if(load_symbols) link_symbols_to_instances(-1);
+  tclvareval("is_xschem_file {", xctx->sch[xctx->currsch], "}", NULL);
+  if(!strcmp(tclresult(), "SYMBOL") || xctx->instances == 0) {
+    if(xctx->netlist_type != CAD_SYMBOL_ATTRS) xctx->save_netlist_type = xctx->netlist_type;
+    xctx->netlist_type = CAD_SYMBOL_ATTRS;
+    set_tcl_netlist_type();
+    xctx->loaded_symbol = 1;
+  } else {
+    if(xctx->loaded_symbol) {
+      xctx->netlist_type = xctx->save_netlist_type;
+      set_tcl_netlist_type();
+    }
+    xctx->loaded_symbol = 0;
+  }
+  check_collapsing_objects();
+  if(reset_undo && tclgetboolvar("autotrim_wires")) trim_wires();
+  update_conn_cues(WIRELAYER, 0, 0);
+  if(xctx->hilight_nets && load_symbols) {
+    propagate_hilights(1, 1, XINSERT_NOREPLACE);
+  }
+  if(reset_undo) {
+    set_netlist_dir(2, NULL);
+    drc_check(-1);
+    tcleval("eval_load_file_postprocess");
+  }
+  return ret;
+}
+
+/* Export current schematic/symbol records to a newly allocated buffer. */
+char *export_schematic_to_buffer(size_t *out_len)
+{
+  FILE *fd;
+  char *data;
+
+  if(!xctx) return NULL;
+  fd = tmpfile();
+  if(!fd) return NULL;
+  write_current_schematic_to_fp(fd);
+  fflush(fd);
+  rewind(fd);
+  data = read_fp_to_buffer(fd, out_len);
+  fclose(fd);
+  return data;
+}
+
 void clear_undo(void)
 {
   xctx->cur_undo_ptr = 0;

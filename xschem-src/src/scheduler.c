@@ -2203,6 +2203,24 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
       Tcl_SetResult(interp, my_itoa((int)xctx->tok_size), TCL_VOLATILE);
     }
 
+    /* get_data
+     *   Return current schematic/symbol records as a string (CORE native bridge).
+     */
+    else if(!strcmp(argv[1], "get_data"))
+    {
+      size_t len = 0;
+      char *data;
+
+      if(!xctx) {Tcl_SetResult(interp, not_avail, TCL_STATIC); return TCL_ERROR;}
+      data = export_schematic_to_buffer(&len);
+      if(!data) {
+        Tcl_SetResult(interp, "xschem get_data failed", TCL_STATIC);
+        return TCL_ERROR;
+      }
+      Tcl_SetObjResult(interp, Tcl_NewStringObj(data, (int)len));
+      my_free(_ALLOC_ID_, &data);
+    }
+
     /* globals
      *   Return various global variables used in the program */
     else if(!strcmp(argv[1], "globals"))
@@ -3199,6 +3217,61 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
         }
       }
       Tcl_SetResult(interp, xctx->sch[xctx->currsch], TCL_STATIC);
+    }
+
+    /* load_data TEXT ?-schname PATH? ?-noundoreset? ?-nosymbols? ?-nofullzoom? ?-nodraw?
+     *   Load schematic/symbol records from memory (CORE native bridge).
+     */
+    else if(!strcmp(argv[1], "load_data") )
+    {
+      int load_symbols = 1, undo_reset = 1, nofullzoom = 0, nodraw = 0;
+      const char *data = NULL;
+      const char *schname = NULL;
+      int i;
+
+      if(!xctx) {Tcl_SetResult(interp, not_avail, TCL_STATIC); return TCL_ERROR;}
+      if(argc < 3) {
+        Tcl_SetResult(interp, "xschem load_data needs at least 1 argument: data", TCL_STATIC);
+        return TCL_ERROR;
+      }
+      for(i = 2; i < argc; i++) {
+        if(argv[i][0] == '-') {
+          if(!strcmp(argv[i], "-nosymbols")) {
+            load_symbols = 0;
+          } else if(!strcmp(argv[i], "-noundoreset")) {
+            undo_reset = 0;
+          } else if(!strcmp(argv[i], "-nofullzoom")) {
+            nofullzoom = 1;
+          } else if(!strcmp(argv[i], "-nodraw")) {
+            nofullzoom = 1; nodraw = 1;
+          } else if(!strcmp(argv[i], "-schname") && i + 1 < argc) {
+            schname = argv[++i];
+          }
+        } else {
+          data = argv[i];
+          break;
+        }
+      }
+      if(!data) {
+        Tcl_SetResult(interp, "xschem load_data: missing data argument", TCL_STATIC);
+        return TCL_ERROR;
+      }
+      if(load_schematic_from_buffer(data, strlen(data), schname ? schname : "", load_symbols, undo_reset)) {
+        if(undo_reset) {
+          my_strdup(_ALLOC_ID_, &xctx->sch_path[xctx->currsch], ".");
+          if(xctx->portmap[xctx->currsch].table) str_hash_free(&xctx->portmap[xctx->currsch]);
+          str_hash_init(&xctx->portmap[xctx->currsch], HASHSIZE);
+          xctx->sch_path_hash[xctx->currsch] = 0;
+          xctx->sch_inst_number[xctx->currsch] = 1;
+        }
+        if(nofullzoom) {
+          if(!nodraw) draw();
+        } else zoom_full(1, 0, 1 + 2 * tclgetboolvar("zoom_full_center"), 0.97);
+        Tcl_SetResult(interp, xctx->sch[xctx->currsch], TCL_STATIC);
+      } else {
+        Tcl_SetResult(interp, "xschem load_data failed", TCL_STATIC);
+        return TCL_ERROR;
+      }
     }
 
     /* load_new_window [-lastclosed | -lastopened] [f]

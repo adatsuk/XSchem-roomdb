@@ -1558,6 +1558,9 @@ extern void mem_pop_undo(int redo, int set_modify_status);
 extern void mem_delete_undo(void);
 extern void mem_clear_undo(void);
 extern int load_schematic(int load_symbol, const char *fname, int reset_undo, int alert);
+extern int load_schematic_from_buffer(const char *data, size_t len, const char *logical_name,
+                                      int load_symbols, int reset_undo);
+extern char *export_schematic_to_buffer(size_t *out_len);
 /* check if filename already in an open window/tab */
 extern int get_tab_or_window_number(const char *win_path);
 extern void swap_tabs(void);
