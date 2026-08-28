@@ -3,8 +3,8 @@
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y \
+sudo apt-get update
+sudo apt-get install -y \
   build-essential cmake git pkg-config curl patchelf \
   autoconf automake libtool zlib1g-dev \
   flex bison gawk \
