@@ -36,34 +36,8 @@ if [[ -d "$INSTALL_PREFIX/share" ]]; then
   cp -a "$INSTALL_PREFIX/share/." "$DIST/share/"
 fi
 
-bundle_skip_lib() {
-  local base
-  base="$(basename "$1")"
-  case "$base" in
-    ld-linux*|linux-vdso*|libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libutil.so*|libresolv.so*|libnss_*|libgcc_s.so*|libstdc++.so*)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-bundle_copy_lib() {
-  local lib="$1"
-  [[ -n "$lib" && -f "$lib" ]] || return 0
-  bundle_skip_lib "$lib" && return 0
-  cp -Ln "$lib" "$STAGE/lib/" 2>/dev/null || cp -L "$lib" "$STAGE/lib/" || true
-}
-
-bundle_binary_libs() {
-  local binary="$1"
-  while IFS= read -r lib; do
-    bundle_copy_lib "$lib"
-  done < <(ldd "$binary" | awk '/=> \// {print $3}' | grep -v '^$' || true)
-}
-
 export LD_LIBRARY_PATH="${STAGE/lib}:${LD_LIBRARY_PATH:-}"
-bundle_binary_libs "$BIN"
-bundle_binary_libs "$CORETCL"
+bash "$(dirname "$0")/bundle_native_libs.sh" "$STAGE/lib" "$BIN" "$CORETCL"
 
 if [[ -n "$CAPNP_ROOT" && -d "$CAPNP_ROOT/lib" ]]; then
   cp -a "$CAPNP_ROOT/lib"/lib*.so* "$STAGE/lib/" 2>/dev/null || true
@@ -123,7 +97,7 @@ Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 Run: ./xschem-run.sh
 
-Requires: Linux x86_64 with glibc 2.28+ (RHEL 8 / Rocky Linux 8 / AlmaLinux 8).
+Requires: Linux x86_64 desktop with X11/Wayland and OpenGL.
 Set COMMONDB_ROOT to your CommonDB checkout for CORE design payloads.
 EOF
 

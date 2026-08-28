@@ -72,7 +72,9 @@ jobs:
         run: |
           export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
           export CAPNP_ROOT="$GITHUB_WORKSPACE/CommonDB/third_party/capnp-install-linux"
-          sed -i 's/\r$//' "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh"
+          sed -i 's/\r$//' \
+            "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh" \
+            "$XSCHEM_ROOT/scripts/bundle_native_libs.sh"
           bash "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh" \
             "$XSCHEM_ROOT/dist-install" \
             "$XSCHEM_ROOT/xschem-rocky8-bundle.tar.gz" \
@@ -151,11 +153,26 @@ jobs:
         run: |
           export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
           export CAPNP_ROOT="$GITHUB_WORKSPACE/CommonDB/third_party/capnp-install-linux"
-          sed -i 's/\r$//' "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh"
+          sed -i 's/\r$//' \
+            "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh" \
+            "$XSCHEM_ROOT/scripts/bundle_native_libs.sh"
           bash "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh" \
             "$XSCHEM_ROOT/dist-install" \
             "$XSCHEM_ROOT/xschem-ubuntu24-bundle.tar.gz" \
             "Ubuntu 24.04"
+
+      - name: Smoke-test bundled binary (headless)
+        run: |
+          set -euxo pipefail
+          tar -xzf XSchem-coredb/xschem-ubuntu24-bundle.tar.gz -C XSchem-coredb
+          test -x XSchem-coredb/dist-bundle/xschem-run.sh
+          if ! timeout 8s xvfb-run -a XSchem-coredb/dist-bundle/xschem-run.sh; then
+            status=$?
+            if [[ "${status}" -ne 124 ]]; then
+              echo "Smoke test failed with exit ${status}" >&2
+              exit "${status}"
+            fi
+          fi
 
       - name: Upload xschem bundle
         uses: actions/upload-artifact@v4

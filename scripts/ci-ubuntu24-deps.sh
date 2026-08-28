@@ -10,4 +10,5 @@ apt-get install -y \
   flex bison gawk \
   tcl tcl-dev tk tk-dev \
   libcairo2-dev libxpm-dev libxrender-dev libxcb1-dev libx11-dev \
-  libjpeg-dev
+  libjpeg-dev \
+  xvfb
