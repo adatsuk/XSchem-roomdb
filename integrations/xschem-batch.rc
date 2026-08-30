@@ -1,0 +1,40 @@
+# Minimal rc for LibMan batch netlist (no script prompt).
+# Includes stock devices + IHP PDK so hierarchical cells (sg13_lv_*) resolve.
+set xschem_execute_scripts yes
+
+set share [file join $env(HOME) .local share xschem]
+if {[file exists [file join $share xschemrc]]} {
+  source [file join $share xschemrc]
+}
+
+# Ensure devices library is present even if share rc was empty.
+if {![info exists XSCHEM_LIBRARY_PATH]} {
+  set XSCHEM_LIBRARY_PATH {}
+}
+if {[file isdirectory [file join $share xschem_library]]} {
+  append XSCHEM_LIBRARY_PATH :[file join $share xschem_library]
+  append XSCHEM_LIBRARY_PATH :[file join $share xschem_library devices]
+}
+
+# IHP Open PDK transistor symbols (sg13g2_pr/sg13_lv_nmos.sym etc.)
+if {![info exists env(PDK_ROOT)] || $env(PDK_ROOT) eq ""} {
+  foreach pdk {
+    [file join $env(HOME) IHP-Open-PDK]
+    /mnt/c/Users/anton/Documents/IHP-Open-PDK
+  } {
+    if {[file isdirectory [file join $pdk ihp-sg13g2]]} {
+      set env(PDK_ROOT) $pdk
+      break
+    }
+  }
+}
+if {![info exists env(PDK)] || $env(PDK) eq ""} {
+  set env(PDK) ihp-sg13g2
+}
+if {[info exists env(PDK_ROOT)] && $env(PDK_ROOT) ne ""} {
+  set pdk_xschem [file join $env(PDK_ROOT) $env(PDK) libs.tech xschem]
+  # Parent of sg13g2_pr so references like sg13g2_pr/sg13_lv_nmos.sym resolve.
+  if {[file isdirectory $pdk_xschem]} {
+    append XSCHEM_LIBRARY_PATH :$pdk_xschem
+  }
+}

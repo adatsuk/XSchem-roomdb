@@ -16,6 +16,24 @@ set -euo pipefail
 export HOME="${HOME:-/home/$(whoami)}"
 export PATH="$HOME/.local/bin:$PATH"
 
+# IHP ngspice: ~/.spiceinit uses $PDK_ROOT/$PDK for .lib and osdi paths.
+if [[ -z "${PDK_ROOT:-}" ]]; then
+  for _pdk_root in \
+    "$HOME/IHP-Open-PDK" \
+    "/mnt/c/Users/anton/Documents/IHP-Open-PDK"; do
+    if [[ -d "${_pdk_root}/ihp-sg13g2/libs.tech/ngspice/models" ]]; then
+      PDK_ROOT="$(readlink -f "$_pdk_root" 2>/dev/null || echo "$_pdk_root")"
+      export PDK_ROOT
+      break
+    fi
+  done
+fi
+export PDK="${PDK:-ihp-sg13g2}"
+
+# Keep netlists/raw files out of CommonDB payload; one dir per LibMan launch.
+export XSCHEM_NETLIST_DIR="${XSCHEM_NETLIST_DIR:-${TMPDIR:-/tmp}/libman-xschem-sim-$$}"
+mkdir -p "$XSCHEM_NETLIST_DIR"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 XSCHEM_ROOT="${XSCHEM_ROOT:-${XSCHEM_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}}"
 XSCHEM_RC="${XSCHEM_RC:-$XSCHEM_ROOT/xschemrc}"
@@ -156,13 +174,18 @@ scrub_geometry_file() {
     function bad_size(w, h) {
       return (w < 200 || h < 200)
     }
+    function bad_position(pos) {
+      return (pos ~ /\+-[0-9]+/ || pos ~ /\+[0-9]+\+-[0-9]+/)
+    }
     {
       line = $0
-      if (line ~ /1x1\+|0x0\+|\+-/) next
+      if (line ~ /1x1\+|0x0\+/) next
+      if (index(line, "untitled") > 0) next
       if (target != "" && index(line, target) > 0) next
       if (index(line, "/tmp/xschem_core_") > 0) next
-      if (match(line, /\{([0-9]+)x([0-9]+)/, sz)) {
+      if (match(line, /\{([0-9]+)x([0-9]+)([^}]*)\}/, sz)) {
         if (bad_size(sz[1], sz[2])) next
+        if (bad_position(sz[3])) next
       }
       print line
     }
@@ -201,6 +224,7 @@ if [[ -z "$XSCHEM_BIN" ]]; then
 fi
 log_launch "starting $XSCHEM_BIN for $INPUT"
 log_launch "DISPLAY=${DISPLAY:-} WAYLAND=${WAYLAND_DISPLAY:-} XDG=${XDG_RUNTIME_DIR:-}"
+log_launch "PDK_ROOT=${PDK_ROOT:-} PDK=${PDK:-} netlist_dir=${XSCHEM_NETLIST_DIR:-}"
 
 case "$(basename "$INPUT")" in
   *.schematic.core|*.symbol.core)
@@ -219,4 +243,5 @@ esac
 # Must exec (foreground): if we background and exit, WSL tears down the session and
 # kills xschem before the window appears. open-xschem-wsl.bat uses "start /b wsl"
 # so this process stays detached from LibMan while wsl remains alive.
+cd "$XSCHEM_NETLIST_DIR"
 exec "$XSCHEM_BIN" --rcfile "$XSCHEM_RC" >>"$LAUNCH_LOG" 2>&1

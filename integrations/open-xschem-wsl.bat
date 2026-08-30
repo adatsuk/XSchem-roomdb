@@ -10,7 +10,7 @@ if "%~1"=="" (
 )
 
 rem Pass LibMan primitive-library env vars into WSL (/p = path translate, lists use : in WSL).
-set "WSLENV=CORE_PRIMITIVE_LIBS_FILE/p:CORE_PRIMITIVE_LIBS/p:CORE_PRIMITIVE_LIB/p:LIBMAN_TECH_LIBRARY/u:XSCHEM_PRIMITIVE_CACHE/p:COMMONDB_ROOT/p:XSCHEM_OPEN_CORE/p:XSCHEM_OPEN_FILE/p"
+set "WSLENV=CORE_PRIMITIVE_LIBS_FILE/p:CORE_PRIMITIVE_LIBS/p:CORE_PRIMITIVE_LIB/p:LIBMAN_TECH_LIBRARY/u:XSCHEM_PRIMITIVE_CACHE/p:COMMONDB_ROOT/p:XSCHEM_OPEN_CORE/p:XSCHEM_OPEN_FILE/p:PDK_ROOT/u:PDK/u:XSCHEM_NETLIST_DIR/u"
 
 wsl --cd "%~dp0" sed -i "s/\r$//" ./open-xschem-wsl.sh 2>nul
 rem Launch WSL in the foreground; LibMan startDetached keeps this alive until xschem exits.

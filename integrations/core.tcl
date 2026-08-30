@@ -249,6 +249,420 @@ proc core_guess_cell_name {corepath} {
   return $base
 }
 
+proc core_logical_schname {corepath {cell ""}} {
+  if {$cell eq ""} {
+    set cell [core_guess_cell_name $corepath]
+  }
+  if {$cell eq ""} {
+    return $corepath
+  }
+  if {[info exists ::env(XSCHEM_NETLIST_DIR)] && $::env(XSCHEM_NETLIST_DIR) ne ""} {
+    catch {file mkdir $::env(XSCHEM_NETLIST_DIR)}
+    set ext ".sch"
+    if {[string match *.symbol.core $corepath]} {
+      set ext ".sym"
+    }
+    return [file join $::env(XSCHEM_NETLIST_DIR) ${cell}${ext}]
+  }
+  return $corepath
+}
+
+proc core_apply_cell_names {corepath {cell ""}} {
+  if {$cell eq ""} {
+    set cell [core_guess_cell_name $corepath]
+  }
+  if {$cell eq ""} {
+    return
+  }
+  catch {xschem set netlist_name ${cell}.spice}
+}
+
+# Add sibling design dirs (e.g. ../inverter/inverter.sym) for hierarchical blocks.
+proc core_add_hierarchy_search_paths {corepath} {
+  global pathlist
+  if {$corepath eq ""} {
+    return
+  }
+  set dir [file normalize [file dirname [core_norm_path $corepath]]]
+  set parent [file dirname $dir]
+  set extra [list $dir $parent]
+  if {[file isdirectory $parent]} {
+    foreach sub [glob -nocomplain -directory $parent *] {
+      if {[file isdirectory $sub]} {
+        lappend extra [file normalize $sub]
+      }
+    }
+  }
+  foreach d [lsort -unique $extra] {
+    if {$d ne "" && [file isdirectory $d] && [lsearch -exact $pathlist $d] < 0} {
+      lappend pathlist $d
+    }
+  }
+}
+
+proc core_preload_primitives {} {
+  core_build_symbol_index
+  core_refresh_pathlist
+  foreach key [array names ::core_symbol_index] {
+    if {[string match "*/*" $key]} {
+      continue
+    }
+    catch {core_materialize_symbol $key}
+  }
+}
+
+proc core_load_core_data {data corepath cell} {
+  set logical [core_logical_schname $corepath $cell]
+  catch {file mkdir [file dirname $logical]}
+  set load_args [list $data -schname $logical]
+  if {[llength [core_primitive_lib_paths]] > 0} {
+    lappend load_args -nosymbols
+  }
+  if {[catch {eval xschem load_data $load_args} err]} {
+    error $err
+  }
+  set schname [xschem get schname]
+  if {[string match *untitled* $schname]} {
+    core_write_sch_data $logical $data
+    xschem load $logical
+    set schname [xschem get schname]
+  }
+  core_set_binding $schname $corepath
+  return $schname
+}
+
+proc core_netlist_when_ready {{tries 0} {expected_cell ""}} {
+  set sch [xschem get schname]
+  if {$expected_cell ne "" && [string match *untitled* $sch] && $tries < 12} {
+    after 250 [list core_netlist_when_ready [expr {$tries + 1}] $expected_cell]
+    return
+  }
+  core_finish_primitive_setup
+  catch {xschem reload_symbols}
+  catch {xschem redraw}
+  catch {xschem netlist}
+}
+
+proc core_sym_file_looks_valid {path} {
+  if {$path eq "" || ![file exists $path]} {
+    return 0
+  }
+  if {[catch {set fh [open $path r]}]} {
+    return 0
+  }
+  set buf [read $fh 8192]
+  close $fh
+  if {![regexp {K \{type=} $buf]} {
+    return 0
+  }
+  # Broken CORE exports often mash format= and template= on one line.
+  if {[regexp {format="@name template=} $buf]} {
+    return 0
+  }
+  return 1
+}
+
+proc core_pick_symbol_file {lookup {paths {}} {maxdepth -1}} {
+  set stock ""
+  if {[info commands find_file_first_orig] ne ""} {
+    set stock [find_file_first_orig $lookup $paths $maxdepth]
+  }
+  if {$stock ne "" && [core_sym_file_looks_valid $stock]} {
+    return $stock
+  }
+  set coreSym [core_resolve_symbol_file $lookup]
+  if {$coreSym ne "" && [file exists $coreSym] && [core_sym_file_looks_valid $coreSym]} {
+    return $coreSym
+  }
+  if {$stock ne "" && [file exists $stock]} {
+    return $stock
+  }
+  return $coreSym
+}
+
+proc core_copy_sch_syms {srcdir outdir {protect_sch ""}} {
+  if {$srcdir eq "" || ![file isdirectory $srcdir]} {
+    return
+  }
+  foreach pattern {*.sym *.sch} {
+    if {[catch {set files [glob -nocomplain -directory $srcdir $pattern]}]} {
+      continue
+    }
+    foreach f $files {
+      set tail [file tail $f]
+      if {$pattern eq "*.sch" && $protect_sch ne "" && $tail eq $protect_sch} {
+        continue
+      }
+      set dst [file join $outdir $tail]
+      if {$pattern eq "*.sym"} {
+        catch {file copy -force $f $dst}
+      } elseif {![file exists $dst]} {
+        catch {file copy -force $f $dst}
+      }
+    }
+  }
+}
+
+proc core_safe_subdirs {parent} {
+  if {$parent eq "" || ![file isdirectory $parent]} {
+    return {}
+  }
+  if {[catch {set subs [glob -nocomplain -directory $parent *]}]} {
+    return {}
+  }
+  set result {}
+  foreach sub $subs {
+    if {[file isdirectory $sub]} {
+      lappend result $sub
+    }
+  }
+  return $result
+}
+
+proc core_stage_hierarchy_syms {sch outdir} {
+  set protect [file tail $sch]
+  set corepath [core_get_binding $sch]
+  if {$corepath ne "" && [file exists $corepath]} {
+    set coredir [file dirname [file normalize $corepath]]
+    set parent [file dirname $coredir]
+    foreach sub [core_safe_subdirs $parent] {
+      core_copy_sch_syms $sub $outdir $protect
+    }
+  }
+  core_copy_sch_syms [file dirname [file normalize $sch]] $outdir $protect
+}
+
+proc core_refresh_sch_on_disk {sch} {
+  if {$sch eq "" || ![file exists $sch]} {
+    return
+  }
+  if {[catch {set data [xschem get_data]} err]} {
+    return
+  }
+  catch {core_write_sch_data $sch $data}
+}
+
+proc core_batch_netlist_rc {} {
+  set batch [file join $::CORE_SCRIPT_DIR xschem-batch.rc]
+  if {[file exists $batch]} {
+    return $batch
+  }
+  foreach candidate [list \
+    [file join $::env(HOME) .local share xschem xschemrc]] {
+    if {[file exists $candidate]} {
+      return $candidate
+    }
+  }
+  return ""
+}
+
+proc core_ensure_pdk_env {} {
+  if {![info exists ::env(PDK_ROOT)] || $::env(PDK_ROOT) eq ""} {
+    foreach pdk [list \
+      [file join $::env(HOME) IHP-Open-PDK] \
+      /mnt/c/Users/anton/Documents/IHP-Open-PDK] {
+      if {[file isdirectory [file join $pdk ihp-sg13g2]]} {
+        set ::env(PDK_ROOT) $pdk
+        break
+      }
+    }
+  }
+  if {![info exists ::env(PDK)] || $::env(PDK) eq ""} {
+    set ::env(PDK) ihp-sg13g2
+  }
+}
+
+proc core_simulation_succeeded {code msg simdir} {
+  if {$code == 0} {
+    return 1
+  }
+  foreach raw [list \
+    [file join $simdir test_inverter.raw] \
+    [file join $simdir tran.raw]] {
+    if {[file exists $raw] && [file size $raw] > 100} {
+      return 1
+    }
+  }
+  if {[regexp {No\. of Data Rows} $msg]} {
+    return 1
+  }
+  if {[regexp -nocase {TRAN done} $msg]} {
+    return 1
+  }
+  return 0
+}
+
+proc core_netlist_looks_valid {nf} {
+  if {![file exists $nf]} {
+    return 0
+  }
+  if {[catch {set fh [open $nf r]}]} {
+    return 0
+  }
+  set content [read $fh]
+  close $fh
+  if {[regexp -nocase {template=name=} $content]} {
+    return 0
+  }
+  return 1
+}
+
+proc core_batch_netlist {outdir sch} {
+  if {![file exists $sch]} {
+    error "schematic not found: $sch"
+  }
+  core_refresh_sch_on_disk $sch
+  core_stage_hierarchy_syms $sch $outdir
+  set xschem_bin xschem
+  if {[info exists ::env(XSCHEM_BIN)] && $::env(XSCHEM_BIN) ne ""} {
+    set xschem_bin $::env(XSCHEM_BIN)
+  }
+  file mkdir $outdir
+  set base [file rootname [file tail $sch]]
+  set nf [file join $outdir ${base}.spice]
+  set rc [core_batch_netlist_rc]
+  set cmd [list $xschem_bin -n -q -s -o $outdir]
+  if {$rc ne ""} {
+    lappend cmd --rcfile $rc
+  }
+  lappend cmd $sch
+  set err ""
+  catch {exec {*}$cmd} err
+  if {![file exists $nf]} {
+    error "batch netlist failed: $err"
+  }
+  if {![core_netlist_looks_valid $nf]} {
+    error "netlist still has unresolved symbols: $nf\n$err"
+  }
+  return $nf
+}
+
+proc core_prepare_for_simulate {} {
+  set sch [xschem get schname]
+  set corepath [core_get_binding $sch]
+  if {$corepath ne ""} {
+    core_add_hierarchy_search_paths $corepath
+  }
+  if {$sch ne "" && [file exists $sch]} {
+    catch {xschem load $sch}
+  }
+  core_preload_primitives
+  core_finish_primitive_setup
+  catch {xschem reload_symbols}
+  catch {xschem redraw}
+}
+
+proc core_report_sim_result {code msg nf d} {
+  set logfile [file join $d sim.log]
+  catch {
+    set lf [open $logfile a]
+    puts $lf "=== [clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}] ==="
+    puts $lf "netlist: $nf"
+    puts $lf $msg
+    close $lf
+  }
+  set summary ""
+  if {$code == 0} {
+    set summary "Simulation completed."
+    foreach raw [list \
+      [file join $d test_inverter.raw] \
+      [file join $d tran.raw]] {
+      if {[file exists $raw]} {
+        append summary "\n\nRaw file:\n$raw"
+        break
+      }
+    }
+    catch {tk_messageBox -icon info -title "Xschem simulation" -message $summary}
+  } else {
+    set short $msg
+    if {[string length $short] > 600} {
+      set short "[string range $short 0 600]..."
+    }
+    set summary "ngspice failed (exit $code).\n\n$short\n\nNetlist:\n$nf\nLog:\n$logfile"
+    catch {tk_messageBox -icon error -title "Xschem simulation failed" -message $summary}
+  }
+}
+
+proc core_install_simulate_hook {} {
+  if {[info commands simulate_orig] ne ""} {
+    return
+  }
+  if {[info commands simulate] eq ""} {
+    after 200 core_install_simulate_hook
+    return
+  }
+  rename simulate simulate_orig
+  # WSL/LibMan: avoid xschem execute_fileevent (ps + Tk screen geometry breaks on WSLg).
+  if {[info exists ::env(XSCHEM_NETLIST_DIR)] && $::env(XSCHEM_NETLIST_DIR) ne ""} {
+    proc simulate {{callback {}}} {
+      global netlist_dir
+      set d $netlist_dir
+      if {$d eq ""} {
+        catch {set d [xschem get netlist_dir]}
+      }
+      core_prepare_for_simulate
+      set sch [xschem get schname]
+      set nf ""
+      set batch_err ""
+      if {$sch ne "" && [file exists $sch]} {
+        if {[catch {set nf [core_batch_netlist $d $sch]} err]} {
+          set batch_err $err
+          puts "batch netlist: $err"
+        }
+      }
+      if {$nf eq "" || ![file exists $nf] || ![core_netlist_looks_valid $nf]} {
+        catch {xschem netlist}
+        set nf [file join $d [xschem get netlist_name fallback]]
+      }
+      if {$nf eq "" || ![file exists $nf]} {
+        set nf [file join $d [file tail $sch].spice]
+      }
+      if {![file exists $nf]} {
+        set msg "Netlist not found."
+        if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
+        core_report_sim_result -1 $msg $nf $d
+        return -1
+      }
+      if {![core_netlist_looks_valid $nf]} {
+        set msg "Netlist has unresolved symbols (template=...).\nRestart xschem after update, or check inverter.sym is available."
+        if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
+        core_report_sim_result -1 $msg $nf $d
+        return -1
+      }
+      set save [pwd]
+      cd $d
+      core_ensure_pdk_env
+      puts "Running: ngspice -b $nf"
+      set code [catch {exec ngspice -b $nf} msg]
+      cd $save
+      if {$msg ne ""} {
+        puts $msg
+      }
+      if {[core_simulation_succeeded $code $msg $d]} {
+        set code 0
+      }
+      core_report_sim_result $code $msg $nf $d
+      if {$callback ne ""} {
+        uplevel #0 $callback
+      }
+      return $code
+    }
+    return
+  }
+  proc simulate {{callback {}}} {
+    global netlist_dir
+    set d $netlist_dir
+    if {$d eq ""} {
+      catch {set d [xschem get netlist_dir]}
+    }
+    set nf [file join $d [xschem get netlist_name fallback]]
+    if {![file exists $nf]} {
+      xschem netlist
+    }
+    simulate_orig $callback
+  }
+}
+
 proc core_open {corepath {cell ""}} {
   core_ensure_loaded
   if {![file exists $corepath]} {
@@ -278,18 +692,21 @@ proc core_open {corepath {cell ""}} {
     }
   }
   set corepath [file normalize $corepath]
+  core_add_hierarchy_search_paths $corepath
+  core_preload_primitives
   if {[core_has_native_bridge]} {
     if {[catch {set data [coreapi_export_cell_data $corepath $cell]} err]} {
       tk_messageBox -icon error -message "Failed to open CORE:\n$err"
       return
     }
-    if {[catch {xschem load_data $data -schname $corepath} err]} {
+    if {[catch {core_load_core_data $data $corepath $cell} err]} {
       tk_messageBox -icon error -message "Failed to load CORE into xschem:\n$err"
       return
     }
-    core_set_binding [xschem get schname] $corepath
+    core_apply_cell_names $corepath $cell
     core_schedule_title_refresh
     core_schedule_primitive_reload
+    after 300 [list core_netlist_when_ready 0 $cell]
     return
   }
   set view [core_view_from_path $corepath]
@@ -305,7 +722,10 @@ proc core_open {corepath {cell ""}} {
   }
   core_set_binding $sch $corepath
   xschem load $sch
+  core_apply_cell_names $corepath $cell
   core_schedule_title_refresh
+  core_schedule_primitive_reload
+  after 300 [list core_netlist_when_ready 0 $cell]
 }
 
 # Show .schematic.core / .symbol.core in window and tab titles (not payload/*.sch).
@@ -895,12 +1315,7 @@ proc core_install_symbol_hooks {} {
   }
   rename find_file_first find_file_first_orig
   proc find_file_first {f {paths {}} {maxdepth -1}} {
-    # Prefer CORE-materialized primitives (same pin centers as LibMan/Qucs CORE path).
-    set coreSym [core_resolve_symbol_file $f]
-    if {$coreSym ne "" && [file exists $coreSym]} {
-      return $coreSym
-    }
-    return [find_file_first_orig $f $paths $maxdepth]
+    return [core_pick_symbol_file $f $paths $maxdepth]
   }
 
   if {[info commands find_file] eq ""} {
@@ -908,9 +1323,9 @@ proc core_install_symbol_hooks {} {
   }
   rename find_file find_file_orig
   proc find_file {f {paths {}} {maxdepth -1}} {
-    set coreSym [core_resolve_symbol_file $f]
-    if {$coreSym ne ""} {
-      return [list $coreSym]
+    set picked [core_pick_symbol_file $f $paths $maxdepth]
+    if {$picked ne ""} {
+      return [list $picked]
     }
     return [find_file_orig $f $paths $maxdepth]
   }
@@ -930,9 +1345,9 @@ proc core_install_abs_sym_path_hook {} {
     if {$ext ne {}} {
       set lookup [file rootname $fname]$ext
     }
-    set coreSym [core_resolve_symbol_file $lookup]
-    if {$coreSym ne "" && [file exists $coreSym]} {
-      return $coreSym
+    set picked [core_pick_symbol_file $lookup $paths]
+    if {$picked ne "" && [file exists $picked]} {
+      return $picked
     }
     return [abs_sym_path_orig $fname $ext $paths]
   }
@@ -997,6 +1412,7 @@ proc core_open_deferred {} {
 after idle {
   core_install_title_hooks
   core_install_file_hooks
+  core_install_simulate_hook
   core_add_menu
   core_install_symbol_hooks
   core_install_abs_sym_path_hook
