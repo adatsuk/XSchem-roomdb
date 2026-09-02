@@ -19,6 +19,7 @@ if {[file isdirectory [file join $share xschem_library]]} {
 # IHP Open PDK transistor symbols (sg13g2_pr/sg13_lv_nmos.sym etc.)
 if {![info exists env(PDK_ROOT)] || $env(PDK_ROOT) eq ""} {
   foreach pdk {
+    /mnt/c/Work/IHP
     [file join $env(HOME) IHP-Open-PDK]
     /mnt/c/Users/anton/Documents/IHP-Open-PDK
   } {
@@ -37,4 +38,23 @@ if {[info exists env(PDK_ROOT)] && $env(PDK_ROOT) ne ""} {
   if {[file isdirectory $pdk_xschem]} {
     append XSCHEM_LIBRARY_PATH :$pdk_xschem
   }
+}
+
+# LibMan CORE primitives (analogLib controllers, cached PDK cells).
+set prim_cache [file join $env(HOME) .cache libman-xschem primitives]
+if {[info exists env(XSCHEM_PRIMITIVE_CACHE)] && $env(XSCHEM_PRIMITIVE_CACHE) ne ""} {
+  set prim_cache $env(XSCHEM_PRIMITIVE_CACHE)
+}
+if {[file isdirectory $prim_cache]} {
+  append XSCHEM_LIBRARY_PATH :$prim_cache
+}
+set script_dir [file dirname [info script]]
+set repo_cache [file join $script_dir primitive_cache]
+if {[file isdirectory $repo_cache]} {
+  append XSCHEM_LIBRARY_PATH :$repo_cache
+}
+set xschem_root [file normalize [file join $script_dir ..]]
+if {[file isdirectory [file join $xschem_root xschem-src xschem_library]]} {
+  append XSCHEM_LIBRARY_PATH :[file join $xschem_root xschem-src xschem_library]
+  append XSCHEM_LIBRARY_PATH :[file join $xschem_root xschem-src xschem_library devices]
 }

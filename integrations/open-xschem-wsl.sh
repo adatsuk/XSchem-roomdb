@@ -19,6 +19,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # IHP ngspice: ~/.spiceinit uses $PDK_ROOT/$PDK for .lib and osdi paths.
 if [[ -z "${PDK_ROOT:-}" ]]; then
   for _pdk_root in \
+    "/mnt/c/Work/IHP" \
     "$HOME/IHP-Open-PDK" \
     "/mnt/c/Users/anton/Documents/IHP-Open-PDK"; do
     if [[ -d "${_pdk_root}/ihp-sg13g2/libs.tech/ngspice/models" ]]; then
@@ -30,9 +31,66 @@ if [[ -z "${PDK_ROOT:-}" ]]; then
 fi
 export PDK="${PDK:-ihp-sg13g2}"
 
+# Mirror tiny PDK tree (models + osdi + xschem) into native WSL ext4 (~6MB).
+# Avoids slow /mnt/c/9p I/O during ngspice and symbol lookup.
+sync_ihp_pdk_native_cache() {
+  local cache="${IH_PDK_NATIVE_CACHE:-$HOME/.cache/ihp-pdk-wsl}"
+  local models_src=""
+  local osdi_src=""
+  local xschem_src=""
+
+  for _root in "/mnt/c/Work/IHP" "$HOME/IHP-Open-PDK" "/mnt/c/Users/anton/Documents/IHP-Open-PDK"; do
+    if [[ -z "$models_src" && -d "${_root}/ihp-sg13g2/libs.tech/ngspice/models" ]]; then
+      models_src="${_root}/ihp-sg13g2/libs.tech/ngspice/models"
+    fi
+    if [[ -z "$osdi_src" && -d "${_root}/ihp-sg13g2/libs.tech/ngspice/osdi" ]]; then
+      osdi_src="${_root}/ihp-sg13g2/libs.tech/ngspice/osdi"
+    fi
+    if [[ -z "$xschem_src" && -d "${_root}/ihp-sg13g2/libs.tech/xschem" ]]; then
+      xschem_src="${_root}/ihp-sg13g2/libs.tech/xschem"
+    fi
+  done
+
+  if [[ -z "$models_src" && -z "$osdi_src" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$cache/ihp-sg13g2/libs.tech/ngspice/models" \
+           "$cache/ihp-sg13g2/libs.tech/ngspice/osdi" \
+           "$cache/ihp-sg13g2/libs.tech/xschem"
+  if [[ -n "$models_src" ]]; then
+    rsync -a --size-only "$models_src/" "$cache/ihp-sg13g2/libs.tech/ngspice/models/"
+  fi
+  if [[ -n "$osdi_src" ]]; then
+    rsync -a --size-only "$osdi_src/" "$cache/ihp-sg13g2/libs.tech/ngspice/osdi/"
+  fi
+  if [[ -n "$xschem_src" ]]; then
+    rsync -a --size-only "$xschem_src/" "$cache/ihp-sg13g2/libs.tech/xschem/"
+  fi
+
+  export PDK_ROOT="$cache"
+  export PDK=ihp-sg13g2
+}
+
+write_netlist_spiceinit() {
+  local dir="$1"
+  [[ -n "${PDK_ROOT:-}" && -d "$PDK_ROOT/$PDK/libs.tech/ngspice/models" ]] || return 0
+  cat >"$dir/.spiceinit" <<EOF
+* LibMan WSL — native PDK cache (fast ext4, not /mnt/c)
+setcs sourcepath = ( $PDK_ROOT/$PDK/libs.tech/ngspice/models )
+osdi '$PDK_ROOT/$PDK/libs.tech/ngspice/osdi/psp103.osdi'
+osdi '$PDK_ROOT/$PDK/libs.tech/ngspice/osdi/psp103_nqs.osdi'
+osdi '$PDK_ROOT/$PDK/libs.tech/ngspice/osdi/r3_cmc.osdi'
+osdi '$PDK_ROOT/$PDK/libs.tech/ngspice/osdi/mosvar.osdi'
+EOF
+}
+
+sync_ihp_pdk_native_cache
+
 # Keep netlists/raw files out of CommonDB payload; one dir per LibMan launch.
 export XSCHEM_NETLIST_DIR="${XSCHEM_NETLIST_DIR:-${TMPDIR:-/tmp}/libman-xschem-sim-$$}"
 mkdir -p "$XSCHEM_NETLIST_DIR"
+write_netlist_spiceinit "$XSCHEM_NETLIST_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 XSCHEM_ROOT="${XSCHEM_ROOT:-${XSCHEM_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}}"
@@ -110,7 +168,7 @@ elif [[ -n "${CORE_PRIMITIVE_LIB:-}" ]]; then
 fi
 
 if [[ -n "${CORE_PRIMITIVE_LIB:-}" || -n "${CORE_PRIMITIVE_LIBS:-}" ]]; then
-  export XSCHEM_PRIMITIVE_CACHE="${XSCHEM_PRIMITIVE_CACHE:-${TMPDIR:-/tmp}/libman-primitives-$$}"
+  export XSCHEM_PRIMITIVE_CACHE="${XSCHEM_PRIMITIVE_CACHE:-$HOME/.cache/libman-xschem/primitives}"
   mkdir -p "$XSCHEM_PRIMITIVE_CACHE"
 fi
 
@@ -198,6 +256,26 @@ export DISPLAY="${DISPLAY:-:0}"
 export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}"
 export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+
+ensure_wslg_display() {
+  local disp="${DISPLAY#:}"
+  if [[ -S "/tmp/.X11-unix/X${disp}" ]]; then
+    return 0
+  fi
+  if [[ -S "/mnt/wslg/.X11-unix/X${disp}" ]]; then
+    mkdir -p /tmp/.X11-unix
+    ln -sf "/mnt/wslg/.X11-unix/X${disp}" "/tmp/.X11-unix/X${disp}" 2>/dev/null || true
+    return 0
+  fi
+  if command -v xdpyinfo >/dev/null 2>&1 && xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    return 0
+  fi
+  msg="WSLg/X11 display unavailable (DISPLAY=$DISPLAY, no X socket). Restart WSL: wsl --shutdown, then reopen LibMan."
+  echo "$msg" >&2
+  log_launch "ERROR: $msg"
+  exit 125
+}
+ensure_wslg_display
 
 resolve_xschem_bin() {
   if [[ -n "${XSCHEM_BIN:-}" && -x "$XSCHEM_BIN" ]]; then

@@ -301,14 +301,10 @@ proc core_add_hierarchy_search_paths {corepath} {
 }
 
 proc core_preload_primitives {} {
+  # Build lookup index only; materialize symbols on demand (core_materialize_symbol).
+  # Pre-exporting every primitive from /mnt/c blocks WSL on p9_client_rpc for minutes.
   core_build_symbol_index
   core_refresh_pathlist
-  foreach key [array names ::core_symbol_index] {
-    if {[string match "*/*" $key]} {
-      continue
-    }
-    catch {core_materialize_symbol $key}
-  }
 }
 
 proc core_load_core_data {data corepath cell} {
@@ -328,6 +324,8 @@ proc core_load_core_data {data corepath cell} {
     set schname [xschem get schname]
   }
   core_set_binding $schname $corepath
+  set ::core_active_corepath [core_norm_path $corepath]
+  set ::core_active_cell $cell
   return $schname
 }
 
@@ -352,7 +350,7 @@ proc core_sym_file_looks_valid {path} {
   }
   set buf [read $fh 8192]
   close $fh
-  if {![regexp {K \{type=} $buf]} {
+  if {![regexp {K \{type=} $buf] && ![regexp {G \{type=netlist_commands} $buf]} {
     return 0
   }
   # Broken CORE exports often mash format= and template= on one line.
@@ -360,6 +358,27 @@ proc core_sym_file_looks_valid {path} {
     return 0
   }
   return 1
+}
+
+proc core_find_hierarchy_sym {lookup} {
+  global pathlist
+  if {![info exists pathlist]} {
+    return ""
+  }
+  set tail [file tail $lookup]
+  foreach dir $pathlist {
+    if {$dir eq "" || ![file isdirectory $dir]} {
+      continue
+    }
+    foreach candidate [list \
+      [file join $dir $lookup] \
+      [file join $dir $tail]] {
+      if {$candidate ne "" && [file exists $candidate] && [core_sym_file_looks_valid $candidate]} {
+        return $candidate
+      }
+    }
+  }
+  return ""
 }
 
 proc core_pick_symbol_file {lookup {paths {}} {maxdepth -1}} {
@@ -370,14 +389,18 @@ proc core_pick_symbol_file {lookup {paths {}} {maxdepth -1}} {
   if {$stock ne "" && [core_sym_file_looks_valid $stock]} {
     return $stock
   }
+  set hierSym [core_find_hierarchy_sym $lookup]
+  if {$hierSym ne ""} {
+    return $hierSym
+  }
   set coreSym [core_resolve_symbol_file $lookup]
   if {$coreSym ne "" && [file exists $coreSym] && [core_sym_file_looks_valid $coreSym]} {
     return $coreSym
   }
-  if {$stock ne "" && [file exists $stock]} {
+  if {$stock ne "" && [file exists $stock] && [core_sym_file_looks_valid $stock]} {
     return $stock
   }
-  return $coreSym
+  return ""
 }
 
 proc core_copy_sch_syms {srcdir outdir {protect_sch ""}} {
@@ -459,6 +482,7 @@ proc core_batch_netlist_rc {} {
 proc core_ensure_pdk_env {} {
   if {![info exists ::env(PDK_ROOT)] || $::env(PDK_ROOT) eq ""} {
     foreach pdk [list \
+      /mnt/c/Work/IHP \
       [file join $::env(HOME) IHP-Open-PDK] \
       /mnt/c/Users/anton/Documents/IHP-Open-PDK] {
       if {[file isdirectory [file join $pdk ihp-sg13g2]]} {
@@ -504,6 +528,10 @@ proc core_netlist_looks_valid {nf} {
   if {[regexp -nocase {template=name=} $content]} {
     return 0
   }
+  # Empty hierarchy when PDK / child symbols fail to resolve.
+  if {[regexp {IS MISSING} $content]} {
+    return 0
+  }
   return 1
 }
 
@@ -543,6 +571,17 @@ proc core_prepare_for_simulate {} {
   if {$corepath ne ""} {
     core_add_hierarchy_search_paths $corepath
   }
+  # Native load_data may leave schname pointing at a path that is not on disk yet.
+  # Batch netlist and hierarchy staging need a real .sch file.
+  if {$sch ne "" && ![file exists $sch]} {
+    if {[catch {set data [xschem get_data]}]} {
+      set data ""
+    }
+    if {$data ne ""} {
+      catch {file mkdir [file dirname $sch]}
+      catch {core_write_sch_data $sch $data}
+    }
+  }
   if {$sch ne "" && [file exists $sch]} {
     catch {xschem load $sch}
   }
@@ -550,6 +589,42 @@ proc core_prepare_for_simulate {} {
   core_finish_primitive_setup
   catch {xschem reload_symbols}
   catch {xschem redraw}
+}
+
+# LibMan/CORE: same netlist path as Simulate (batch + xschem-batch.rc), not interactive netlist.
+proc core_ensure_netlist {d {sch ""} {batch_err_var ""}} {
+  core_prepare_for_simulate
+  if {$sch eq ""} {
+    set sch [xschem get schname]
+  }
+  set nf ""
+  set batch_err_msg ""
+  if {$sch ne "" && ![file exists $sch]} {
+    if {![catch {set data [xschem get_data]}] && $data ne ""} {
+      catch {file mkdir [file dirname $sch]}
+      catch {core_write_sch_data $sch $data}
+    }
+  }
+  if {$sch ne "" && [file exists $sch]} {
+    if {[catch {set nf [core_batch_netlist $d $sch]} err]} {
+      set batch_err_msg $err
+      puts "batch netlist: $err"
+    }
+  }
+  if {$nf eq "" || ![file exists $nf] || ![core_netlist_looks_valid $nf]} {
+    catch {xschem netlist}
+    set nf [file join $d [xschem get netlist_name fallback]]
+  }
+  if {$nf eq "" || ![file exists $nf]} {
+    if {$sch ne ""} {
+      set nf [file join $d [file rootname [file tail $sch]].spice]
+    }
+  }
+  if {$batch_err_var ne ""} {
+    upvar 1 $batch_err_var batch_err_out
+    set batch_err_out $batch_err_msg
+  }
+  return $nf
 }
 
 proc core_report_sim_result {code msg nf d} {
@@ -600,23 +675,8 @@ proc core_install_simulate_hook {} {
       if {$d eq ""} {
         catch {set d [xschem get netlist_dir]}
       }
-      core_prepare_for_simulate
-      set sch [xschem get schname]
-      set nf ""
       set batch_err ""
-      if {$sch ne "" && [file exists $sch]} {
-        if {[catch {set nf [core_batch_netlist $d $sch]} err]} {
-          set batch_err $err
-          puts "batch netlist: $err"
-        }
-      }
-      if {$nf eq "" || ![file exists $nf] || ![core_netlist_looks_valid $nf]} {
-        catch {xschem netlist}
-        set nf [file join $d [xschem get netlist_name fallback]]
-      }
-      if {$nf eq "" || ![file exists $nf]} {
-        set nf [file join $d [file tail $sch].spice]
-      }
+      set nf [core_ensure_netlist $d "" batch_err]
       if {![file exists $nf]} {
         set msg "Netlist not found."
         if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
@@ -624,7 +684,7 @@ proc core_install_simulate_hook {} {
         return -1
       }
       if {![core_netlist_looks_valid $nf]} {
-        set msg "Netlist has unresolved symbols (template=...).\nRestart xschem after update, or check inverter.sym is available."
+        set msg "Netlist has unresolved symbols (template=... or IS MISSING).\nCheck PDK_ROOT and that inverter.sch/sym are findable."
         if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
         core_report_sim_result -1 $msg $nf $d
         return -1
@@ -692,6 +752,8 @@ proc core_open {corepath {cell ""}} {
     }
   }
   set corepath [file normalize $corepath]
+  set ::core_active_corepath $corepath
+  set ::core_active_cell $cell
   core_add_hierarchy_search_paths $corepath
   core_preload_primitives
   if {[core_has_native_bridge]} {
@@ -823,14 +885,20 @@ proc core_file_save {} {
   if {$sch eq ""} {
     return
   }
-  set corepath [core_get_binding $sch]
+  set corepath [core_resolve_corepath $sch]
   if {$corepath ne ""} {
+    core_set_binding $sch $corepath
     if {[catch {core_write $sch $corepath} err]} {
       tk_messageBox -icon error -message "CORE save failed:\n$err"
+      core_log_launch "CORE save FAILED: $corepath ($err)"
+    } else {
+      core_log_launch "CORE saved: $corepath"
+      catch {core_refresh_window_title " (saved)"}
     }
     return
   }
   xschem save
+  core_log_launch "xschem save only (no CORE binding): $sch"
 }
 
 proc core_file_saveas {} {
@@ -877,6 +945,30 @@ proc core_file_saveas {} {
   }
 }
 
+proc core_resolve_corepath {{sch ""}} {
+  if {$sch ne ""} {
+    set corepath [core_get_binding $sch]
+    if {$corepath ne ""} {
+      return $corepath
+    }
+  }
+  if {[info exists ::core_active_corepath] && $::core_active_corepath ne ""} {
+    return $::core_active_corepath
+  }
+  return ""
+}
+
+proc core_log_launch {msg} {
+  if {![info exists ::env(XSCHEM_LAUNCH_LOG)] || $::env(XSCHEM_LAUNCH_LOG) eq ""} {
+    return
+  }
+  catch {
+    set lf [open $::env(XSCHEM_LAUNCH_LOG) a]
+    puts $lf "[clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S%z}] $msg"
+    close $lf
+  }
+}
+
 proc core_install_file_hooks {} {
   if {[catch {set topwin [xschem get top_path]}]} {
     after 500 core_install_file_hooks
@@ -890,6 +982,15 @@ proc core_install_file_hooks {} {
   catch {
     bind $topwin <Control-o> {core_file_open ;# %}
     bind $topwin <Control-s> {core_file_save ;# %}
+  }
+  # Toolbar still uses "xschem save" by default — only writes /tmp/*.sch, not CORE.
+  catch {
+    if {[winfo exists $topwin.toolbar.bFileSave]} {
+      $topwin.toolbar.bFileSave configure -command core_file_save
+    }
+    if {[winfo exists $topwin.toolbar.bFileSaveAs]} {
+      $topwin.toolbar.bFileSaveAs configure -command core_file_saveas
+    }
   }
 }
 
@@ -1408,11 +1509,113 @@ proc core_open_deferred {} {
   }
 }
 
+proc core_install_wsl_execute_hook {} {
+  if {[info commands execute_fileevent_orig] ne ""} {
+    return
+  }
+  if {![info exists ::env(XSCHEM_NETLIST_DIR)] || $::env(XSCHEM_NETLIST_DIR) eq ""} {
+    return
+  }
+  if {[info commands execute_fileevent] eq ""} {
+    after 200 core_install_wsl_execute_hook
+    return
+  }
+  rename execute_fileevent execute_fileevent_orig
+  # WSLg: ps polling in execute_fileevent fails ("131072x1 screen size is bogus").
+  proc execute_fileevent {id} {
+    global execute has_x errorCode
+    append execute(data,$id) [read $execute(pipe,$id) 1024]
+    if {![eof $execute(pipe,$id)]} {
+      return
+    }
+    set report [regexp {1} $execute(status,$id)]
+    fileevent $execute(pipe,$id) readable ""
+    fconfigure $execute(pipe,$id) -blocking 1
+    set exit_status 0
+    set catch_return [eval catch [list {close $execute(pipe,$id)} err] ]
+    if {$catch_return} {
+      if {"NONE" == [lindex $errorCode 0]} {
+        set exit_status 0
+      } elseif {"CHILDSTATUS" == [lindex $errorCode 0]} {
+        set exit_status [lindex $errorCode 2]
+      } else {
+        set exit_status $catch_return
+      }
+      if {$exit_status != 0 && $report} {
+        catch {viewdata "Failed: $execute(cmd,$id)\nstderr:\n$err\ndata:\n$execute(data,$id)"}
+      } elseif {$report} {
+        catch {viewdata "Completed: $execute(cmd,$id)\nstderr:\n$err\ndata:\n$execute(data,$id)"}
+      }
+    } elseif {$report} {
+      catch {viewdata "Completed: $execute(cmd,$id)\ndata:\n$execute(data,$id)"}
+    }
+    set execute(exitcode,last) $exit_status
+    set execute(exitcode,$id) $exit_status
+    set execute(cmd,last) $execute(cmd,$id)
+    set execute(win_path,last) $execute(win_path,$id)
+    set execute(data,last) $execute(data,$id)
+    if {![info exists err]} { set err {} }
+    set execute(error,last) $err
+    set execute(status,last) $execute(status,$id)
+    if {[info exists execute(callback,$id)] && $execute(callback,$id) ne {}} {
+      catch {eval uplevel #0 [list $execute(callback,$id)]}
+    }
+    catch {unset execute(callback,$id)}
+    catch {unset execute(pipe,$id)}
+    catch {unset execute(data,$id)}
+    catch {unset execute(status,$id)}
+    catch {unset execute(cmd,$id)}
+    catch {unset execute(win_path,$id)}
+    if {[info exists has_x] && [winfo exists .processlist]} {
+      after 250 {insert_running_cmds .processlist.f2.lb}
+    }
+  }
+
+  if {[info commands edit_netlist_orig] ne ""} {
+    return
+  }
+  if {[info commands edit_netlist] eq ""} {
+    return
+  }
+  rename edit_netlist edit_netlist_orig
+  proc edit_netlist {netlist} {
+    global netlist_dir
+    regsub {/$} $netlist_dir {} netlist_dir
+    if {[set_netlist_dir 0] eq ""} {
+      return {}
+    }
+    set d $netlist_dir
+    set batch_err ""
+    set nf [core_ensure_netlist $d "" batch_err]
+    if {![file exists $nf]} {
+      set msg "Netlist not found."
+      if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
+      tk_messageBox -icon warning -message $msg
+      return {}
+    }
+    if {![core_netlist_looks_valid $nf]} {
+      set msg "Netlist has unresolved symbols (template=... or IS MISSING).\n\n$nf"
+      if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
+      tk_messageBox -icon warning -message $msg
+    }
+    set fh [open $nf r]
+    set body [read $fh]
+    close $fh
+    if {[info commands viewdata] ne ""} {
+      viewdata $body 1
+    } else {
+      tk_messageBox -icon info -message "Netlist:\n$nf"
+    }
+    return {}
+  }
+}
+
 # Fast filename-only index before CORE load; reload_symbols again after open/scripts.
 after idle {
   core_install_title_hooks
   core_install_file_hooks
   core_install_simulate_hook
+  core_install_wsl_execute_hook
   core_add_menu
   core_install_symbol_hooks
   core_install_abs_sym_path_hook
@@ -1425,5 +1628,7 @@ after idle {
   after 150 core_ensure_window_geometry
   after 600 core_ensure_window_geometry
   after 1500 core_ensure_window_geometry
+  after 800 core_install_file_hooks
+  after 2000 core_install_file_hooks
   core_schedule_primitive_reload
 }

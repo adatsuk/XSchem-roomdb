@@ -36,6 +36,7 @@ append XSCHEM_LIBRARY_PATH :$env(HOME)/.local/share/doc/xschem/examples
 # IHP Open PDK (sg13g2_pr/sg13_lv_nmos.sym etc.) — required for hierarchical netlist.
 if {![info exists ::env(PDK_ROOT)] || $::env(PDK_ROOT) eq ""} {
   foreach pdk {
+    /mnt/c/Work/IHP
     [file join $env(HOME) IHP-Open-PDK]
     /mnt/c/Users/anton/Documents/IHP-Open-PDK
   } {
