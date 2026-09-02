@@ -49,6 +49,8 @@ proc core_clear_binding {sch} {
   }
 }
 
+source [file join $::CORE_SCRIPT_DIR core_lock.tcl]
+
 # payload/cell.sym opened directly -> bind parent cell.symbol.core for title/save.
 proc core_try_bind_payload_sch {sch} {
   set sch [core_norm_path $sch]
@@ -769,6 +771,7 @@ proc core_open {corepath {cell ""}} {
     core_schedule_title_refresh
     core_schedule_primitive_reload
     after 300 [list core_netlist_when_ready 0 $cell]
+    core_lock_on_open $corepath
     return
   }
   set view [core_view_from_path $corepath]
@@ -788,9 +791,9 @@ proc core_open {corepath {cell ""}} {
   core_schedule_title_refresh
   core_schedule_primitive_reload
   after 300 [list core_netlist_when_ready 0 $cell]
+  core_lock_on_open $corepath
 }
 
-# Show .schematic.core / .symbol.core in window and tab titles (not payload/*.sch).
 proc core_refresh_window_title {{mod {}}} {
   set sch [xschem get schname]
   if {$sch eq ""} {
@@ -802,6 +805,9 @@ proc core_refresh_window_title {{mod {}}} {
     return
   }
   set label [file tail $corepath]
+  if {[core_lock_is_viewonly $corepath]} {
+    set label "\[Read-only\] $label"
+  }
   if {[catch {set win [xschem get top_path]}] || $win eq {}} {
     set win .
   }
@@ -837,6 +843,7 @@ proc core_install_title_hooks {} {
 
 proc core_write {sch corepath} {
   core_ensure_loaded
+  core_lock_assert_writable $corepath
   if {![core_is_core_path $corepath]} {
     error "CORE path must be .schematic.core or .symbol.core: $corepath"
   }
@@ -885,6 +892,10 @@ proc core_file_save {} {
   if {$sch eq ""} {
     return
   }
+  if {[core_lock_is_viewonly]} {
+    tk_messageBox -icon warning -message "Document is read-only.\n\n[core_lock_status_text]"
+    return
+  }
   set corepath [core_resolve_corepath $sch]
   if {$corepath ne ""} {
     core_set_binding $sch $corepath
@@ -902,6 +913,10 @@ proc core_file_save {} {
 }
 
 proc core_file_saveas {} {
+  if {[core_lock_is_viewonly]} {
+    tk_messageBox -icon warning -message "Document is read-only.\n\n[core_lock_status_text]"
+    return
+  }
   set sch [xschem get schname]
   set initdir [file dirname $sch]
   if {$initdir eq "." || $initdir eq ""} {
@@ -992,9 +1007,14 @@ proc core_install_file_hooks {} {
       $topwin.toolbar.bFileSaveAs configure -command core_file_saveas
     }
   }
+  core_lock_sync_ui
 }
 
 proc core_save_current {} {
+  if {[core_lock_is_viewonly]} {
+    tk_messageBox -icon warning -message "Document is read-only.\n\n[core_lock_status_text]"
+    return
+  }
   core_file_save
   set sch [xschem get schname]
   if {$sch eq ""} {
@@ -1619,6 +1639,7 @@ after idle {
   core_add_menu
   core_install_symbol_hooks
   core_install_abs_sym_path_hook
+  core_lock_install_hooks
   core_register_system_devices
   core_build_symbol_index
   core_refresh_pathlist
