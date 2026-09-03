@@ -527,11 +527,18 @@ proc core_netlist_looks_valid {nf} {
   }
   set content [read $fh]
   close $fh
-  if {[regexp -nocase {template=name=} $content]} {
+  # Ignore spice_ignore lines (e.g. analogLib/launcher emits template=name=h1).
+  set filtered {}
+  foreach line [split $content "\n"] {
+    if {[string match -nocase "*spice_ignore=true*" $line]} {
+      continue
+    }
+    append filtered $line "\n"
+  }
+  if {[regexp -nocase {template=name=} $filtered]} {
     return 0
   }
-  # Empty hierarchy when PDK / child symbols fail to resolve.
-  if {[regexp {IS MISSING} $content]} {
+  if {[regexp {IS MISSING} $filtered]} {
     return 0
   }
   return 1
@@ -1291,6 +1298,18 @@ proc core_build_symbol_index {} {
     if {$libpfx eq "commonLib"} {
       core_register_symbol_key "devices/$cell.sym" $corepath
     }
+    # Simulation controllers / sources are analogLib; keep analogLib/ keys even if a
+    # legacy CORE still lives under commonLib (resolver remaps commonLib -> analogLib).
+    foreach simcell {launcher INCLSCR TR Vdc Vac Vpulse Vexp Vrect Idc Iac Ipulse GND vdd vss} {
+      if {$cell eq $simcell} {
+        core_register_symbol_key "analogLib/$cell.sym" $corepath
+        break
+      }
+    }
+    if {$libpfx eq "analogLib" && $cell eq "launcher"} {
+      # Bare name for older schematics that still say C {launcher.sym}
+      core_register_symbol_key "launcher.sym" $corepath
+    }
     if {$techlib ne ""} {
       foreach tlib [split $techlib {;}] {
         set tlib [string trim $tlib]
@@ -1492,6 +1511,14 @@ proc core_refresh_pathlist {} {
   }
   if {[lsearch -exact $pathlist $cache] < 0} {
     lappend pathlist $cache
+  }
+  # Always expose tier dirs so analogLib/foo.sym and commonLib/bar.sym resolve
+  # from the seeded primitive_cache even before CORE materialization.
+  foreach tier {analogLib commonLib devices} {
+    set sub [file join $cache $tier]
+    if {[file isdirectory $sub] && [lsearch -exact $pathlist $sub] < 0} {
+      lappend pathlist $sub
+    }
   }
   if {[info exists ::env(LIBMAN_TECH_LIBRARY)] && $::env(LIBMAN_TECH_LIBRARY) ne ""} {
     foreach tlib [split $::env(LIBMAN_TECH_LIBRARY) ";"] {
