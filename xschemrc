@@ -1,24 +1,26 @@
-# Xschem workspace config with CORE in-process integration
+# Xschem workspace config with ROOM in-process integration
 
 # LibMan/WSL: ignore corrupted per-file sizes in ~/.xschem/geometry (e.g. 1x1)
 set initial_geometry {1300x950}
 
-# CORE is authoritative; payload/*.sch is Xschem editor cache (export on open, import on save).
+# ROOM is authoritative; payload/*.sch is Xschem editor cache (export on open, import on save).
 
 set ::XSCHEM_ROOT [file normalize [file dirname [info script]]]
 
 if {[info exists ::env(COMMONDB_ROOT)] && $::env(COMMONDB_ROOT) ne ""} {
-  set ::CORE_ROOT [file normalize $::env(COMMONDB_ROOT)]
+  set ::ROOM_ROOT [file normalize $::env(COMMONDB_ROOT)]
+} elseif {[info exists ::env(ROOM_ROOT)] && $::env(ROOM_ROOT) ne ""} {
+  set ::ROOM_ROOT [file normalize $::env(ROOM_ROOT)]
 } elseif {[info exists ::env(CORE_ROOT)] && $::env(CORE_ROOT) ne ""} {
-  set ::CORE_ROOT [file normalize $::env(CORE_ROOT)]
+  set ::ROOM_ROOT [file normalize $::env(CORE_ROOT)]
 } else {
-  set ::CORE_ROOT [file normalize [file join $::XSCHEM_ROOT .. CommonDB]]
+  set ::ROOM_ROOT [file normalize [file join $::XSCHEM_ROOT .. CommonDB]]
 }
 
-set ::core_payload_dir [file join $::CORE_ROOT designs xschem payload]
+set ::room_payload_dir [file join $::ROOM_ROOT designs xschem payload]
 
 set XSCHEM_LIBRARY_PATH {}
-append XSCHEM_LIBRARY_PATH :$::core_payload_dir
+append XSCHEM_LIBRARY_PATH :$::room_payload_dir
 append XSCHEM_LIBRARY_PATH :[file join $::XSCHEM_ROOT integrations qucs_symbols]
 # Schematics reference devices/lab_pin.sym — library root must be xschem_library/
 # (not the devices/ subdir alone, or devices/devices/lab_pin.sym is searched).
@@ -58,14 +60,14 @@ if {[info exists ::env(PDK_ROOT)] && $::env(PDK_ROOT) ne ""} {
 }
 
 # LibMan tech primitives land here (open-xschem-wsl.sh sets XSCHEM_PRIMITIVE_CACHE per session).
-set ::core_primitive_cache [file join $::XSCHEM_ROOT integrations primitive_cache]
+set ::room_primitive_cache [file join $::XSCHEM_ROOT integrations primitive_cache]
 if {[info exists ::env(XSCHEM_PRIMITIVE_CACHE)] && $::env(XSCHEM_PRIMITIVE_CACHE) ne ""} {
-  catch {set ::core_primitive_cache [file normalize $::env(XSCHEM_PRIMITIVE_CACHE)]}
+  catch {set ::room_primitive_cache [file normalize $::env(XSCHEM_PRIMITIVE_CACHE)]}
 }
-catch {file mkdir $::core_primitive_cache}
-append XSCHEM_LIBRARY_PATH :$::core_primitive_cache
+catch {file mkdir $::room_primitive_cache}
+append XSCHEM_LIBRARY_PATH :$::room_primitive_cache
 
-# LibMan CORE files are trusted project data; avoid modal script prompt blocking startup.
+# LibMan ROOM files are trusted project data; avoid modal script prompt blocking startup.
 set xschem_execute_scripts yes
 
 # Default Xschem uses gvim; WSL images often lack it — prefer vim/nano if available.
@@ -77,7 +79,7 @@ if {[catch {exec which vim}]} {
   set editor {vim -f}
 }
 
-set netlist_dir $::core_payload_dir
+set netlist_dir $::room_payload_dir
 if {[info exists ::env(XSCHEM_NETLIST_DIR)] && $::env(XSCHEM_NETLIST_DIR) ne ""} {
   catch {file mkdir $::env(XSCHEM_NETLIST_DIR)}
   set netlist_dir $::env(XSCHEM_NETLIST_DIR)
@@ -100,4 +102,4 @@ proc libman_configure_ngspice {} {
 }
 after idle libman_configure_ngspice
 
-source [file join $::XSCHEM_ROOT integrations core.tcl]
+source [file join $::XSCHEM_ROOT integrations room.tcl]

@@ -16,6 +16,23 @@ set -euo pipefail
 export HOME="${HOME:-/home/$(whoami)}"
 export PATH="$HOME/.local/bin:$PATH"
 
+# LibMan still exports the older CORE_* names.
+if [[ -z "${ROOM_ROOT:-}" && -n "${CORE_ROOT:-}" ]]; then
+  export ROOM_ROOT="$CORE_ROOT"
+fi
+if [[ -z "${ROOM_PRIMITIVE_LIBS_FILE:-}" && -n "${CORE_PRIMITIVE_LIBS_FILE:-}" ]]; then
+  export ROOM_PRIMITIVE_LIBS_FILE="$CORE_PRIMITIVE_LIBS_FILE"
+fi
+if [[ -z "${ROOM_PRIMITIVE_LIBS:-}" && -n "${CORE_PRIMITIVE_LIBS:-}" ]]; then
+  export ROOM_PRIMITIVE_LIBS="$CORE_PRIMITIVE_LIBS"
+fi
+if [[ -z "${ROOM_PRIMITIVE_LIB:-}" && -n "${CORE_PRIMITIVE_LIB:-}" ]]; then
+  export ROOM_PRIMITIVE_LIB="$CORE_PRIMITIVE_LIB"
+fi
+if [[ -z "${XSCHEM_OPEN_ROOM:-}" && -n "${XSCHEM_OPEN_CORE:-}" ]]; then
+  export XSCHEM_OPEN_ROOM="$XSCHEM_OPEN_CORE"
+fi
+
 # IHP ngspice: ~/.spiceinit uses $PDK_ROOT/$PDK for .lib and osdi paths.
 if [[ -z "${PDK_ROOT:-}" ]]; then
   for _pdk_root in \
@@ -133,8 +150,8 @@ split_primitive_libs() {
   printf '%s\n' "${arr[@]}"
 }
 
-if [[ -n "${CORE_PRIMITIVE_LIBS_FILE:-}" ]]; then
-  _list_file="$(wsl_path_if_windows "$CORE_PRIMITIVE_LIBS_FILE")"
+if [[ -n "${ROOM_PRIMITIVE_LIBS_FILE:-}" ]]; then
+  _list_file="$(wsl_path_if_windows "$ROOM_PRIMITIVE_LIBS_FILE")"
   if [[ -f "$_list_file" ]]; then
     _converted=()
     while IFS= read -r _p || [[ -n "$_p" ]]; do
@@ -143,37 +160,37 @@ if [[ -n "${CORE_PRIMITIVE_LIBS_FILE:-}" ]]; then
       _converted+=("$_p")
     done < "$_list_file"
     if [[ ${#_converted[@]} -gt 0 ]]; then
-      CORE_PRIMITIVE_LIBS="$(IFS=':'; echo "${_converted[*]}")"
-      export CORE_PRIMITIVE_LIBS
-      export CORE_PRIMITIVE_LIB="${_converted[0]}"
-      unset CORE_PRIMITIVE_LIBS_FILE
+      ROOM_PRIMITIVE_LIBS="$(IFS=':'; echo "${_converted[*]}")"
+      export ROOM_PRIMITIVE_LIBS
+      export ROOM_PRIMITIVE_LIB="${_converted[0]}"
+      unset ROOM_PRIMITIVE_LIBS_FILE
     fi
   fi
 fi
 
-if [[ -n "${CORE_PRIMITIVE_LIBS:-}" ]]; then
+if [[ -n "${ROOM_PRIMITIVE_LIBS:-}" ]]; then
   _converted=()
   while IFS= read -r _p; do
     _p="$(normalize_primitive_path "$_p" || true)"
     [[ -z "$_p" ]] && continue
     _converted+=("$_p")
-  done < <(split_primitive_libs "$CORE_PRIMITIVE_LIBS")
-  CORE_PRIMITIVE_LIBS="$(IFS=':'; echo "${_converted[*]}")"
-  export CORE_PRIMITIVE_LIBS
+  done < <(split_primitive_libs "$ROOM_PRIMITIVE_LIBS")
+  ROOM_PRIMITIVE_LIBS="$(IFS=':'; echo "${_converted[*]}")"
+  export ROOM_PRIMITIVE_LIBS
   if [[ ${#_converted[@]} -gt 0 ]]; then
-    export CORE_PRIMITIVE_LIB="${_converted[0]}"
+    export ROOM_PRIMITIVE_LIB="${_converted[0]}"
   fi
-elif [[ -n "${CORE_PRIMITIVE_LIB:-}" ]]; then
-  export CORE_PRIMITIVE_LIB="$(wsl_path_if_windows "$CORE_PRIMITIVE_LIB")"
+elif [[ -n "${ROOM_PRIMITIVE_LIB:-}" ]]; then
+  export ROOM_PRIMITIVE_LIB="$(wsl_path_if_windows "$ROOM_PRIMITIVE_LIB")"
 fi
 
-if [[ -n "${CORE_PRIMITIVE_LIB:-}" || -n "${CORE_PRIMITIVE_LIBS:-}" ]]; then
+if [[ -n "${ROOM_PRIMITIVE_LIB:-}" || -n "${ROOM_PRIMITIVE_LIBS:-}" ]]; then
   export XSCHEM_PRIMITIVE_CACHE="${XSCHEM_PRIMITIVE_CACHE:-$HOME/.cache/libman-xschem/primitives}"
   mkdir -p "$XSCHEM_PRIMITIVE_CACHE"
 fi
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: $0 <sch|sym|schematic.core|symbol.core>" >&2
+  echo "usage: $0 <sch|sym|schematic.room|symbol.room>" >&2
   exit 1
 fi
 
@@ -220,7 +237,7 @@ if [[ ! -f "$INPUT" ]]; then
 fi
 
 # Corrupted ~/.xschem/geometry hides the window (1x1, 0x0, off-screen coords).
-# Also drop saved geometry for this file and ephemeral CORE temp paths so
+# Also drop saved geometry for this file and ephemeral ROOM temp paths so
 # xschemrc initial_geometry {1300x950} applies on launch.
 scrub_geometry_file() {
   local geom="${HOME}/.xschem/geometry"
@@ -240,7 +257,7 @@ scrub_geometry_file() {
       if (line ~ /1x1\+|0x0\+/) next
       if (index(line, "untitled") > 0) next
       if (target != "" && index(line, target) > 0) next
-      if (index(line, "/tmp/xschem_core_") > 0) next
+      if (index(line, "/tmp/xschem_room_") > 0) next
       if (match(line, /\{([0-9]+)x([0-9]+)([^}]*)\}/, sz)) {
         if (bad_size(sz[1], sz[2])) next
         if (bad_position(sz[3])) next
@@ -305,8 +322,8 @@ log_launch "DISPLAY=${DISPLAY:-} WAYLAND=${WAYLAND_DISPLAY:-} XDG=${XDG_RUNTIME_
 log_launch "PDK_ROOT=${PDK_ROOT:-} PDK=${PDK:-} netlist_dir=${XSCHEM_NETLIST_DIR:-}"
 
 case "$(basename "$INPUT")" in
-  *.schematic.core|*.symbol.core)
-    export XSCHEM_OPEN_CORE="$INPUT"
+  *.schematic.room|*.symbol.room|*.schematic.core|*.symbol.core)
+    export XSCHEM_OPEN_ROOM="$INPUT"
     ;;
   *.sch|*.sym)
     export XSCHEM_OPEN_FILE="$INPUT"

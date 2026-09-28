@@ -40,7 +40,7 @@ if {[info exists env(PDK_ROOT)] && $env(PDK_ROOT) ne ""} {
   }
 }
 
-# LibMan CORE primitives (analogLib controllers, cached PDK cells).
+# LibMan ROOM primitives (analogLib controllers, cached PDK cells).
 set prim_cache [file join $env(HOME) .cache libman-xschem primitives]
 if {[info exists env(XSCHEM_PRIMITIVE_CACHE)] && $env(XSCHEM_PRIMITIVE_CACHE) ne ""} {
   set prim_cache $env(XSCHEM_PRIMITIVE_CACHE)

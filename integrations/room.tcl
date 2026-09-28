@@ -1,60 +1,74 @@
-# CORE in-process integration for Xschem (coretcl.so + CORE API).
-# Xschem owns schematic/symbol views: cell.schematic.core, cell.symbol.core
+# ROOM in-process integration for Xschem (roomtcl.so + ROOM API).
+# Xschem owns schematic/symbol views: cell.schematic.room, cell.symbol.room
 
-set ::CORE_SCRIPT_DIR [file normalize [file dirname [info script]]]
+set ::ROOM_SCRIPT_DIR [file normalize [file dirname [info script]]]
 
-if {![info exists ::XSCHEM_ROOT]} {
-  set ::XSCHEM_ROOT [file normalize [file dirname $::CORE_SCRIPT_DIR]]
-}
-
-if {![info exists ::CORE_ROOT]} {
-  if {[info exists ::env(COMMONDB_ROOT)] && $::env(COMMONDB_ROOT) ne ""} {
-    set ::CORE_ROOT [file normalize $::env(COMMONDB_ROOT)]
-  } elseif {[info exists ::env(CORE_ROOT)] && $::env(CORE_ROOT) ne ""} {
-    set ::CORE_ROOT [file normalize $::env(CORE_ROOT)]
-  } else {
-    set ::CORE_ROOT [file normalize [file join $::XSCHEM_ROOT .. CommonDB]]
+foreach {oldName newName} {
+  CORE_PRIMITIVE_LIBS_FILE ROOM_PRIMITIVE_LIBS_FILE
+  CORE_PRIMITIVE_LIBS ROOM_PRIMITIVE_LIBS
+  CORE_PRIMITIVE_LIB ROOM_PRIMITIVE_LIB
+  XSCHEM_OPEN_CORE XSCHEM_OPEN_ROOM
+} {
+  if {(![info exists ::env($newName)] || $::env($newName) eq "")
+      && [info exists ::env($oldName)] && $::env($oldName) ne ""} {
+    set ::env($newName) $::env($oldName)
   }
 }
 
-set ::CORE_LIB [file join $::CORE_ROOT designs xschem test.schematic.core]
-set ::CORE_PAYLOAD [file join $::CORE_ROOT designs xschem payload]
+if {![info exists ::XSCHEM_ROOT]} {
+  set ::XSCHEM_ROOT [file normalize [file dirname $::ROOM_SCRIPT_DIR]]
+}
 
-# sch/sym path -> backing .core file (keys are normalized absolute paths)
-array set ::core_binding {}
+if {![info exists ::ROOM_ROOT]} {
+  if {[info exists ::env(COMMONDB_ROOT)] && $::env(COMMONDB_ROOT) ne ""} {
+    set ::ROOM_ROOT [file normalize $::env(COMMONDB_ROOT)]
+  } elseif {[info exists ::env(ROOM_ROOT)] && $::env(ROOM_ROOT) ne ""} {
+    set ::ROOM_ROOT [file normalize $::env(ROOM_ROOT)]
+  } elseif {[info exists ::env(CORE_ROOT)] && $::env(CORE_ROOT) ne ""} {
+    set ::ROOM_ROOT [file normalize $::env(CORE_ROOT)]
+  } else {
+    set ::ROOM_ROOT [file normalize [file join $::XSCHEM_ROOT .. CommonDB]]
+  }
+}
 
-proc core_norm_path {path} {
+set ::ROOM_LIB [file join $::ROOM_ROOT designs xschem test.schematic.room]
+set ::ROOM_PAYLOAD [file join $::ROOM_ROOT designs xschem payload]
+
+# sch/sym path -> backing .room file (keys are normalized absolute paths)
+array set ::room_binding {}
+
+proc room_norm_path {path} {
   if {$path eq ""} {
     return ""
   }
   return [file normalize $path]
 }
 
-proc core_set_binding {sch corepath} {
-  set ::core_binding([core_norm_path $sch]) [core_norm_path $corepath]
+proc room_set_binding {sch roompath} {
+  set ::room_binding([room_norm_path $sch]) [room_norm_path $roompath]
 }
 
-proc core_get_binding {sch} {
-  set key [core_norm_path $sch]
-  if {$key ne "" && [info exists ::core_binding($key)]} {
-    return $::core_binding($key)
+proc room_get_binding {sch} {
+  set key [room_norm_path $sch]
+  if {$key ne "" && [info exists ::room_binding($key)]} {
+    return $::room_binding($key)
   }
   return ""
 }
 
-proc core_clear_binding {sch} {
-  set key [core_norm_path $sch]
-  if {$key ne "" && [info exists ::core_binding($key)]} {
-    unset ::core_binding($key)
+proc room_clear_binding {sch} {
+  set key [room_norm_path $sch]
+  if {$key ne "" && [info exists ::room_binding($key)]} {
+    unset ::room_binding($key)
   }
 }
 
-source [file join $::CORE_SCRIPT_DIR core_lock.tcl]
+source [file join $::ROOM_SCRIPT_DIR room_lock.tcl]
 
-# payload/cell.sym opened directly -> bind parent cell.symbol.core for title/save.
-proc core_try_bind_payload_sch {sch} {
-  set sch [core_norm_path $sch]
-  if {$sch eq "" || [core_get_binding $sch] ne ""} {
+# payload/cell.sym opened directly -> bind parent cell.symbol.room for title/save.
+proc room_try_bind_payload_sch {sch} {
+  set sch [room_norm_path $sch]
+  if {$sch eq "" || [room_get_binding $sch] ne ""} {
     return 0
   }
   if {![string equal -nocase [file tail [file dirname $sch]] payload]} {
@@ -62,27 +76,27 @@ proc core_try_bind_payload_sch {sch} {
   }
   set parent [file dirname [file dirname $sch]]
   set cell [file rootname [file tail $sch]]
-  foreach suffix {symbol.core schematic.core} {
-    set corepath [file join $parent ${cell}.${suffix}]
-    if {[file exists $corepath]} {
-      core_set_binding $sch $corepath
+  foreach suffix {symbol.room schematic.room symbol.core schematic.core} {
+    set roompath [file join $parent ${cell}.${suffix}]
+    if {[file exists $roompath]} {
+      room_set_binding $sch $roompath
       return 1
     }
   }
   return 0
 }
 
-proc core_schedule_title_refresh {} {
+proc room_schedule_title_refresh {} {
   foreach delay {0 100 400} {
-    after $delay core_refresh_window_title
+    after $delay room_refresh_window_title
   }
 }
 
-proc core_find_tcl_lib {} {
+proc room_find_tcl_lib {} {
   set candidates [list \
-    [file join $::CORE_SCRIPT_DIR coretcl.so] \
-    [file join $::CORE_ROOT build-wsl integrations xschem_tcl coretcl.so] \
-    [file join $::CORE_ROOT build integrations xschem_tcl coretcl.so]]
+    [file join $::ROOM_SCRIPT_DIR roomtcl.so] \
+    [file join $::ROOM_ROOT build-wsl integrations xschem_tcl roomtcl.so] \
+    [file join $::ROOM_ROOT build integrations xschem_tcl roomtcl.so]]
   foreach path $candidates {
     if {[file exists $path]} {
       return $path
@@ -91,19 +105,19 @@ proc core_find_tcl_lib {} {
   return ""
 }
 
-proc core_ensure_loaded {} {
+proc room_ensure_loaded {} {
   if {[namespace which -command coreapi_list_cells] ne ""} {
     return
   }
-  set lib [core_find_tcl_lib]
+  set lib [room_find_tcl_lib]
   if {$lib eq ""} {
-    set build_script [file join $::XSCHEM_ROOT build-core-tcl.sh]
-    error "coretcl.so not found. Run: bash $build_script"
+    set build_script [file join $::XSCHEM_ROOT build-room-tcl.sh]
+    error "roomtcl.so not found. Run: bash $build_script"
   }
   load $lib Core
 }
 
-proc core_view_for_sch {schpath} {
+proc room_view_for_sch {schpath} {
   set ext [string tolower [file extension $schpath]]
   if {$ext eq ".sym"} {
     return symbol
@@ -111,34 +125,34 @@ proc core_view_for_sch {schpath} {
   return schematic
 }
 
-proc core_ext_for_view {view} {
+proc room_ext_for_view {view} {
   if {$view eq "symbol"} {
     return .sym
   }
   return .sch
 }
 
-proc core_is_core_path {path} {
+proc room_is_room_path {path} {
   foreach view {schematic symbol} {
-    if {[string match -nocase *.$view.core $path]} {
+    if {[string match -nocase *.$view.room $path] || [string match -nocase *.$view.core $path]} {
       return 1
     }
   }
   return 0
 }
 
-proc core_cell_from_path {path} {
-  core_ensure_loaded
+proc room_cell_from_path {path} {
+  room_ensure_loaded
   return [lindex [coreapi_parse_core_path $path] 0]
 }
 
-proc core_view_from_path {path} {
-  core_ensure_loaded
+proc room_view_from_path {path} {
+  room_ensure_loaded
   return [lindex [coreapi_parse_core_path $path] 1]
 }
 
-proc core_path_for_cell {cell view {dir ""}} {
-  core_ensure_loaded
+proc room_path_for_cell {cell view {dir ""}} {
+  room_ensure_loaded
   set name [coreapi_core_file_name $cell $view]
   if {$dir ne ""} {
     return [file join $dir $name]
@@ -146,94 +160,94 @@ proc core_path_for_cell {cell view {dir ""}} {
   return $name
 }
 
-proc core_default_core_path {sch} {
+proc room_default_room_path {sch} {
   set cell [file rootname [file tail $sch]]
-  set view [core_view_for_sch $sch]
+  set view [room_view_for_sch $sch]
   set dir [file dirname $sch]
   if {[string equal -nocase [file tail $dir] payload]} {
     set dir [file dirname $dir]
   }
-  return [core_path_for_cell $cell $view $dir]
+  return [room_path_for_cell $cell $view $dir]
 }
 
-proc core_save_defaultextension {} {
+proc room_save_defaultextension {} {
   set sch [xschem get schname]
   if {$sch ne "" && [string match -nocase *.sym $sch]} {
-    return .symbol.core
+    return .symbol.room
   }
-  return .schematic.core
+  return .schematic.room
 }
 
-proc core_payload_dir {corepath} {
-  return [file join [file dirname $corepath] payload]
+proc room_payload_dir {roompath} {
+  return [file join [file dirname $roompath] payload]
 }
 
-proc core_list_cells {corepath} {
-  core_ensure_loaded
-  return [coreapi_list_cells $corepath]
+proc room_list_cells {roompath} {
+  room_ensure_loaded
+  return [coreapi_list_cells $roompath]
 }
 
-proc core_pick_cell {cells {title "Select cell"}} {
-  set top .core_pick_cell
+proc room_pick_cell {cells {title "Select cell"}} {
+  set top .room_pick_cell
   if {[winfo exists $top]} {
     destroy $top
   }
-  set ::core_pick_cell_answer ""
+  set ::room_pick_cell_answer ""
   toplevel $top
   wm title $top $title
   wm transient $top [xschem get topwindow]
-  label $top.lbl -text "CORE file contains multiple cells:"
-  listbox $top.lb -listvariable ::core_pick_cell_list -height 10 -width 40 \
+  label $top.lbl -text "ROOM file contains multiple cells:"
+  listbox $top.lb -listvariable ::room_pick_cell_list -height 10 -width 40 \
     -exportselection 0 -selectmode browse
-  set ::core_pick_cell_list $cells
+  set ::room_pick_cell_list $cells
   $top.lb selection set 0
   frame $top.btns
   button $top.btns.ok -text OK -command {
-    set sel [.core_pick_cell.lb curselection]
+    set sel [.room_pick_cell.lb curselection]
     if {$sel ne {}} {
-      set ::core_pick_cell_answer [lindex $::core_pick_cell_list $sel]
+      set ::room_pick_cell_answer [lindex $::room_pick_cell_list $sel]
     }
-    destroy .core_pick_cell
+    destroy .room_pick_cell
   }
-  button $top.btns.cancel -text Cancel -command {destroy .core_pick_cell}
+  button $top.btns.cancel -text Cancel -command {destroy .room_pick_cell}
   pack $top.lbl -padx 8 -pady 4
   pack $top.lb -padx 8 -pady 4 -fill both -expand 1
   pack $top.btns.ok $top.btns.cancel -side left -padx 8 -pady 8
   pack $top.btns
   bind $top.lb <Double-Button-1> "$top.btns.ok invoke"
   tkwait window $top
-  return $::core_pick_cell_answer
+  return $::room_pick_cell_answer
 }
 
-proc core_temp_sch_path {cell ext} {
-  if {[catch {set fh [file tempfile -prefix "xschem_core_${cell}_" -suffix $ext]} err]} {
+proc room_temp_sch_path {cell ext} {
+  if {[catch {set fh [file tempfile -prefix "xschem_room_${cell}_" -suffix $ext]} err]} {
     set dir "/tmp"
     if {[info exists ::env(TEMP)] && $::env(TEMP) ne ""} {
       set dir $::env(TEMP)
     }
-    return [file join $dir xschem_core_[pid]_[clock clicks]$ext]
+    return [file join $dir xschem_room_[pid]_[clock clicks]$ext]
   }
   close $fh
   return $fh
 }
 
-proc core_write_sch_data {sch data} {
+proc room_write_sch_data {sch data} {
   set fh [open $sch w]
   fconfigure $fh -translation binary
   puts -nonewline $fh $data
   close $fh
 }
 
-proc core_export_cell_to_sch {corepath cell sch} {
+proc room_export_cell_to_sch {roompath cell sch} {
   if {[info commands coreapi_export_cell_data] ne ""} {
-    set data [coreapi_export_cell_data $corepath $cell]
-    core_write_sch_data $sch $data
+    set data [coreapi_export_cell_data $roompath $cell]
+    room_write_sch_data $sch $data
     return
   }
-  coreapi_export_cell $corepath $cell $sch
+  coreapi_export_cell $roompath $cell $sch
 }
 
-proc core_has_native_bridge {} {
+proc room_has_native_bridge {} {
   if {[info commands xschem] eq ""} {
     return 0
   }
@@ -243,35 +257,35 @@ proc core_has_native_bridge {} {
   return 0
 }
 
-proc core_guess_cell_name {corepath} {
-  set base [file rootname [file tail $corepath]]
+proc room_guess_cell_name {roompath} {
+  set base [file rootname [file tail $roompath]]
   if {[regexp {^(.+)\.(schematic|symbol)$} $base -> cell]} {
     return $cell
   }
   return $base
 }
 
-proc core_logical_schname {corepath {cell ""}} {
+proc room_logical_schname {roompath {cell ""}} {
   if {$cell eq ""} {
-    set cell [core_guess_cell_name $corepath]
+    set cell [room_guess_cell_name $roompath]
   }
   if {$cell eq ""} {
-    return $corepath
+    return $roompath
   }
   if {[info exists ::env(XSCHEM_NETLIST_DIR)] && $::env(XSCHEM_NETLIST_DIR) ne ""} {
     catch {file mkdir $::env(XSCHEM_NETLIST_DIR)}
     set ext ".sch"
-    if {[string match *.symbol.core $corepath]} {
+    if {[string match *.symbol.room $roompath]} {
       set ext ".sym"
     }
     return [file join $::env(XSCHEM_NETLIST_DIR) ${cell}${ext}]
   }
-  return $corepath
+  return $roompath
 }
 
-proc core_apply_cell_names {corepath {cell ""}} {
+proc room_apply_cell_names {roompath {cell ""}} {
   if {$cell eq ""} {
-    set cell [core_guess_cell_name $corepath]
+    set cell [room_guess_cell_name $roompath]
   }
   if {$cell eq ""} {
     return
@@ -280,12 +294,12 @@ proc core_apply_cell_names {corepath {cell ""}} {
 }
 
 # Add sibling design dirs (e.g. ../inverter/inverter.sym) for hierarchical blocks.
-proc core_add_hierarchy_search_paths {corepath} {
+proc room_add_hierarchy_search_paths {roompath} {
   global pathlist
-  if {$corepath eq ""} {
+  if {$roompath eq ""} {
     return
   }
-  set dir [file normalize [file dirname [core_norm_path $corepath]]]
+  set dir [file normalize [file dirname [room_norm_path $roompath]]]
   set parent [file dirname $dir]
   set extra [list $dir $parent]
   if {[file isdirectory $parent]} {
@@ -302,18 +316,18 @@ proc core_add_hierarchy_search_paths {corepath} {
   }
 }
 
-proc core_preload_primitives {} {
-  # Build lookup index only; materialize symbols on demand (core_materialize_symbol).
+proc room_preload_primitives {} {
+  # Build lookup index only; materialize symbols on demand (room_materialize_symbol).
   # Pre-exporting every primitive from /mnt/c blocks WSL on p9_client_rpc for minutes.
-  core_build_symbol_index
-  core_refresh_pathlist
+  room_build_symbol_index
+  room_refresh_pathlist
 }
 
-proc core_load_core_data {data corepath cell} {
-  set logical [core_logical_schname $corepath $cell]
+proc room_load_room_data {data roompath cell} {
+  set logical [room_logical_schname $roompath $cell]
   catch {file mkdir [file dirname $logical]}
   set load_args [list $data -schname $logical]
-  if {[llength [core_primitive_lib_paths]] > 0} {
+  if {[llength [room_primitive_lib_paths]] > 0} {
     lappend load_args -nosymbols
   }
   if {[catch {eval xschem load_data $load_args} err]} {
@@ -321,29 +335,29 @@ proc core_load_core_data {data corepath cell} {
   }
   set schname [xschem get schname]
   if {[string match *untitled* $schname]} {
-    core_write_sch_data $logical $data
+    room_write_sch_data $logical $data
     xschem load $logical
     set schname [xschem get schname]
   }
-  core_set_binding $schname $corepath
-  set ::core_active_corepath [core_norm_path $corepath]
-  set ::core_active_cell $cell
+  room_set_binding $schname $roompath
+  set ::room_active_roompath [room_norm_path $roompath]
+  set ::room_active_cell $cell
   return $schname
 }
 
-proc core_netlist_when_ready {{tries 0} {expected_cell ""}} {
+proc room_netlist_when_ready {{tries 0} {expected_cell ""}} {
   set sch [xschem get schname]
   if {$expected_cell ne "" && [string match *untitled* $sch] && $tries < 12} {
-    after 250 [list core_netlist_when_ready [expr {$tries + 1}] $expected_cell]
+    after 250 [list room_netlist_when_ready [expr {$tries + 1}] $expected_cell]
     return
   }
-  core_finish_primitive_setup
+  room_finish_primitive_setup
   catch {xschem reload_symbols}
   catch {xschem redraw}
   catch {xschem netlist}
 }
 
-proc core_sym_file_looks_valid {path} {
+proc room_sym_file_looks_valid {path} {
   if {$path eq "" || ![file exists $path]} {
     return 0
   }
@@ -355,14 +369,14 @@ proc core_sym_file_looks_valid {path} {
   if {![regexp {K \{type=} $buf] && ![regexp {G \{type=netlist_commands} $buf]} {
     return 0
   }
-  # Broken CORE exports often mash format= and template= on one line.
+  # Broken ROOM exports often mash format= and template= on one line.
   if {[regexp {format="@name template=} $buf]} {
     return 0
   }
   return 1
 }
 
-proc core_find_hierarchy_sym {lookup} {
+proc room_find_hierarchy_sym {lookup} {
   global pathlist
   if {![info exists pathlist]} {
     return ""
@@ -375,7 +389,7 @@ proc core_find_hierarchy_sym {lookup} {
     foreach candidate [list \
       [file join $dir $lookup] \
       [file join $dir $tail]] {
-      if {$candidate ne "" && [file exists $candidate] && [core_sym_file_looks_valid $candidate]} {
+      if {$candidate ne "" && [file exists $candidate] && [room_sym_file_looks_valid $candidate]} {
         return $candidate
       }
     }
@@ -383,29 +397,29 @@ proc core_find_hierarchy_sym {lookup} {
   return ""
 }
 
-proc core_pick_symbol_file {lookup {paths {}} {maxdepth -1}} {
+proc room_pick_symbol_file {lookup {paths {}} {maxdepth -1}} {
   set stock ""
   if {[info commands find_file_first_orig] ne ""} {
     set stock [find_file_first_orig $lookup $paths $maxdepth]
   }
-  if {$stock ne "" && [core_sym_file_looks_valid $stock]} {
+  if {$stock ne "" && [room_sym_file_looks_valid $stock]} {
     return $stock
   }
-  set hierSym [core_find_hierarchy_sym $lookup]
+  set hierSym [room_find_hierarchy_sym $lookup]
   if {$hierSym ne ""} {
     return $hierSym
   }
-  set coreSym [core_resolve_symbol_file $lookup]
-  if {$coreSym ne "" && [file exists $coreSym] && [core_sym_file_looks_valid $coreSym]} {
+  set coreSym [room_resolve_symbol_file $lookup]
+  if {$coreSym ne "" && [file exists $coreSym] && [room_sym_file_looks_valid $coreSym]} {
     return $coreSym
   }
-  if {$stock ne "" && [file exists $stock] && [core_sym_file_looks_valid $stock]} {
+  if {$stock ne "" && [file exists $stock] && [room_sym_file_looks_valid $stock]} {
     return $stock
   }
   return ""
 }
 
-proc core_copy_sch_syms {srcdir outdir {protect_sch ""}} {
+proc room_copy_sch_syms {srcdir outdir {protect_sch ""}} {
   if {$srcdir eq "" || ![file isdirectory $srcdir]} {
     return
   }
@@ -428,7 +442,7 @@ proc core_copy_sch_syms {srcdir outdir {protect_sch ""}} {
   }
 }
 
-proc core_safe_subdirs {parent} {
+proc room_safe_subdirs {parent} {
   if {$parent eq "" || ![file isdirectory $parent]} {
     return {}
   }
@@ -444,31 +458,31 @@ proc core_safe_subdirs {parent} {
   return $result
 }
 
-proc core_stage_hierarchy_syms {sch outdir} {
+proc room_stage_hierarchy_syms {sch outdir} {
   set protect [file tail $sch]
-  set corepath [core_get_binding $sch]
-  if {$corepath ne "" && [file exists $corepath]} {
-    set coredir [file dirname [file normalize $corepath]]
+  set roompath [room_get_binding $sch]
+  if {$roompath ne "" && [file exists $roompath]} {
+    set coredir [file dirname [file normalize $roompath]]
     set parent [file dirname $coredir]
-    foreach sub [core_safe_subdirs $parent] {
-      core_copy_sch_syms $sub $outdir $protect
+    foreach sub [room_safe_subdirs $parent] {
+      room_copy_sch_syms $sub $outdir $protect
     }
   }
-  core_copy_sch_syms [file dirname [file normalize $sch]] $outdir $protect
+  room_copy_sch_syms [file dirname [file normalize $sch]] $outdir $protect
 }
 
-proc core_refresh_sch_on_disk {sch} {
+proc room_refresh_sch_on_disk {sch} {
   if {$sch eq "" || ![file exists $sch]} {
     return
   }
   if {[catch {set data [xschem get_data]} err]} {
     return
   }
-  catch {core_write_sch_data $sch $data}
+  catch {room_write_sch_data $sch $data}
 }
 
-proc core_batch_netlist_rc {} {
-  set batch [file join $::CORE_SCRIPT_DIR xschem-batch.rc]
+proc room_batch_netlist_rc {} {
+  set batch [file join $::ROOM_SCRIPT_DIR xschem-batch.rc]
   if {[file exists $batch]} {
     return $batch
   }
@@ -481,7 +495,7 @@ proc core_batch_netlist_rc {} {
   return ""
 }
 
-proc core_ensure_pdk_env {} {
+proc room_ensure_pdk_env {} {
   if {![info exists ::env(PDK_ROOT)] || $::env(PDK_ROOT) eq ""} {
     foreach pdk [list \
       /mnt/c/Work/IHP \
@@ -498,7 +512,7 @@ proc core_ensure_pdk_env {} {
   }
 }
 
-proc core_simulation_succeeded {code msg simdir} {
+proc room_simulation_succeeded {code msg simdir} {
   if {$code == 0} {
     return 1
   }
@@ -518,7 +532,7 @@ proc core_simulation_succeeded {code msg simdir} {
   return 0
 }
 
-proc core_netlist_looks_valid {nf} {
+proc room_netlist_looks_valid {nf} {
   if {![file exists $nf]} {
     return 0
   }
@@ -544,12 +558,12 @@ proc core_netlist_looks_valid {nf} {
   return 1
 }
 
-proc core_batch_netlist {outdir sch} {
+proc room_batch_netlist {outdir sch} {
   if {![file exists $sch]} {
     error "schematic not found: $sch"
   }
-  core_refresh_sch_on_disk $sch
-  core_stage_hierarchy_syms $sch $outdir
+  room_refresh_sch_on_disk $sch
+  room_stage_hierarchy_syms $sch $outdir
   set xschem_bin xschem
   if {[info exists ::env(XSCHEM_BIN)] && $::env(XSCHEM_BIN) ne ""} {
     set xschem_bin $::env(XSCHEM_BIN)
@@ -557,7 +571,7 @@ proc core_batch_netlist {outdir sch} {
   file mkdir $outdir
   set base [file rootname [file tail $sch]]
   set nf [file join $outdir ${base}.spice]
-  set rc [core_batch_netlist_rc]
+  set rc [room_batch_netlist_rc]
   set cmd [list $xschem_bin -n -q -s -o $outdir]
   if {$rc ne ""} {
     lappend cmd --rcfile $rc
@@ -568,17 +582,17 @@ proc core_batch_netlist {outdir sch} {
   if {![file exists $nf]} {
     error "batch netlist failed: $err"
   }
-  if {![core_netlist_looks_valid $nf]} {
+  if {![room_netlist_looks_valid $nf]} {
     error "netlist still has unresolved symbols: $nf\n$err"
   }
   return $nf
 }
 
-proc core_prepare_for_simulate {} {
+proc room_prepare_for_simulate {} {
   set sch [xschem get schname]
-  set corepath [core_get_binding $sch]
-  if {$corepath ne ""} {
-    core_add_hierarchy_search_paths $corepath
+  set roompath [room_get_binding $sch]
+  if {$roompath ne ""} {
+    room_add_hierarchy_search_paths $roompath
   }
   # Native load_data may leave schname pointing at a path that is not on disk yet.
   # Batch netlist and hierarchy staging need a real .sch file.
@@ -588,21 +602,21 @@ proc core_prepare_for_simulate {} {
     }
     if {$data ne ""} {
       catch {file mkdir [file dirname $sch]}
-      catch {core_write_sch_data $sch $data}
+      catch {room_write_sch_data $sch $data}
     }
   }
   if {$sch ne "" && [file exists $sch]} {
     catch {xschem load $sch}
   }
-  core_preload_primitives
-  core_finish_primitive_setup
+  room_preload_primitives
+  room_finish_primitive_setup
   catch {xschem reload_symbols}
   catch {xschem redraw}
 }
 
-# LibMan/CORE: same netlist path as Simulate (batch + xschem-batch.rc), not interactive netlist.
-proc core_ensure_netlist {d {sch ""} {batch_err_var ""}} {
-  core_prepare_for_simulate
+# LibMan/ROOM: same netlist path as Simulate (batch + xschem-batch.rc), not interactive netlist.
+proc room_ensure_netlist {d {sch ""} {batch_err_var ""}} {
+  room_prepare_for_simulate
   if {$sch eq ""} {
     set sch [xschem get schname]
   }
@@ -611,16 +625,16 @@ proc core_ensure_netlist {d {sch ""} {batch_err_var ""}} {
   if {$sch ne "" && ![file exists $sch]} {
     if {![catch {set data [xschem get_data]}] && $data ne ""} {
       catch {file mkdir [file dirname $sch]}
-      catch {core_write_sch_data $sch $data}
+      catch {room_write_sch_data $sch $data}
     }
   }
   if {$sch ne "" && [file exists $sch]} {
-    if {[catch {set nf [core_batch_netlist $d $sch]} err]} {
+    if {[catch {set nf [room_batch_netlist $d $sch]} err]} {
       set batch_err_msg $err
       puts "batch netlist: $err"
     }
   }
-  if {$nf eq "" || ![file exists $nf] || ![core_netlist_looks_valid $nf]} {
+  if {$nf eq "" || ![file exists $nf] || ![room_netlist_looks_valid $nf]} {
     catch {xschem netlist}
     set nf [file join $d [xschem get netlist_name fallback]]
   }
@@ -636,7 +650,7 @@ proc core_ensure_netlist {d {sch ""} {batch_err_var ""}} {
   return $nf
 }
 
-proc core_report_sim_result {code msg nf d} {
+proc room_report_sim_result {code msg nf d} {
   set logfile [file join $d sim.log]
   catch {
     set lf [open $logfile a]
@@ -667,12 +681,12 @@ proc core_report_sim_result {code msg nf d} {
   }
 }
 
-proc core_install_simulate_hook {} {
+proc room_install_simulate_hook {} {
   if {[info commands simulate_orig] ne ""} {
     return
   }
   if {[info commands simulate] eq ""} {
-    after 200 core_install_simulate_hook
+    after 200 room_install_simulate_hook
     return
   }
   rename simulate simulate_orig
@@ -685,32 +699,32 @@ proc core_install_simulate_hook {} {
         catch {set d [xschem get netlist_dir]}
       }
       set batch_err ""
-      set nf [core_ensure_netlist $d "" batch_err]
+      set nf [room_ensure_netlist $d "" batch_err]
       if {![file exists $nf]} {
         set msg "Netlist not found."
         if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
-        core_report_sim_result -1 $msg $nf $d
+        room_report_sim_result -1 $msg $nf $d
         return -1
       }
-      if {![core_netlist_looks_valid $nf]} {
+      if {![room_netlist_looks_valid $nf]} {
         set msg "Netlist has unresolved symbols (template=... or IS MISSING).\nCheck PDK_ROOT and that inverter.sch/sym are findable."
         if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
-        core_report_sim_result -1 $msg $nf $d
+        room_report_sim_result -1 $msg $nf $d
         return -1
       }
       set save [pwd]
       cd $d
-      core_ensure_pdk_env
+      room_ensure_pdk_env
       puts "Running: ngspice -b $nf"
       set code [catch {exec ngspice -b $nf} msg]
       cd $save
       if {$msg ne ""} {
         puts $msg
       }
-      if {[core_simulation_succeeded $code $msg $d]} {
+      if {[room_simulation_succeeded $code $msg $d]} {
         set code 0
       }
-      core_report_sim_result $code $msg $nf $d
+      room_report_sim_result $code $msg $nf $d
       if {$callback ne ""} {
         uplevel #0 $callback
       }
@@ -732,21 +746,21 @@ proc core_install_simulate_hook {} {
   }
 }
 
-proc core_open {corepath {cell ""}} {
-  core_ensure_loaded
-  if {![file exists $corepath]} {
-    tk_messageBox -icon error -message "CORE file not found:\n$corepath"
+proc room_open {roompath {cell ""}} {
+  room_ensure_loaded
+  if {![file exists $roompath]} {
+    tk_messageBox -icon error -message "ROOM file not found:\n$roompath"
     return
   }
-  if {![core_is_core_path $corepath]} {
-    tk_messageBox -icon error -message "Not an Xschem CORE file.\nExpected .schematic.core or .symbol.core:\n$corepath"
+  if {![room_is_room_path $roompath]} {
+    tk_messageBox -icon error -message "Not an Xschem ROOM file.\nExpected .schematic.room or .symbol.room:\n$roompath"
     return
   }
   if {$cell eq ""} {
-    set guess [core_guess_cell_name $corepath]
-    set cells [core_list_cells $corepath]
+    set guess [room_guess_cell_name $roompath]
+    set cells [room_list_cells $roompath]
     if {[llength $cells] == 0} {
-      tk_messageBox -icon error -message "No cells in:\n$corepath"
+      tk_messageBox -icon error -message "No cells in:\n$roompath"
       return
     }
     if {$guess ne "" && [lsearch -exact $cells $guess] >= 0} {
@@ -754,65 +768,65 @@ proc core_open {corepath {cell ""}} {
     } elseif {[llength $cells] == 1} {
       set cell [lindex $cells 0]
     } else {
-      set cell [core_pick_cell $cells "Open CORE: [file tail $corepath]"]
+      set cell [room_pick_cell $cells "Open ROOM: [file tail $roompath]"]
       if {$cell eq ""} {
         return
       }
     }
   }
-  set corepath [file normalize $corepath]
-  set ::core_active_corepath $corepath
-  set ::core_active_cell $cell
-  core_add_hierarchy_search_paths $corepath
-  core_preload_primitives
-  if {[core_has_native_bridge]} {
-    if {[catch {set data [coreapi_export_cell_data $corepath $cell]} err]} {
-      tk_messageBox -icon error -message "Failed to open CORE:\n$err"
+  set roompath [file normalize $roompath]
+  set ::room_active_roompath $roompath
+  set ::room_active_cell $cell
+  room_add_hierarchy_search_paths $roompath
+  room_preload_primitives
+  if {[room_has_native_bridge]} {
+    if {[catch {set data [coreapi_export_cell_data $roompath $cell]} err]} {
+      tk_messageBox -icon error -message "Failed to open ROOM:\n$err"
       return
     }
-    if {[catch {core_load_core_data $data $corepath $cell} err]} {
-      tk_messageBox -icon error -message "Failed to load CORE into xschem:\n$err"
+    if {[catch {room_load_room_data $data $roompath $cell} err]} {
+      tk_messageBox -icon error -message "Failed to load ROOM into xschem:\n$err"
       return
     }
-    core_apply_cell_names $corepath $cell
-    core_schedule_title_refresh
-    core_schedule_primitive_reload
-    after 300 [list core_netlist_when_ready 0 $cell]
-    core_lock_on_open $corepath
+    room_apply_cell_names $roompath $cell
+    room_schedule_title_refresh
+    room_schedule_primitive_reload
+    after 300 [list room_netlist_when_ready 0 $cell]
+    room_lock_on_open $roompath
     return
   }
-  set view [core_view_from_path $corepath]
-  set ext [core_ext_for_view $view]
+  set view [room_view_from_path $roompath]
+  set ext [room_ext_for_view $view]
   if {[string match *.* $cell]} {
-    set sch [core_temp_sch_path [file tail $cell] $ext]
+    set sch [room_temp_sch_path [file tail $cell] $ext]
   } else {
-    set sch [core_temp_sch_path $cell $ext]
+    set sch [room_temp_sch_path $cell $ext]
   }
-  if {[catch {core_export_cell_to_sch $corepath $cell $sch} err]} {
-    tk_messageBox -icon error -message "Failed to open CORE:\n$err"
+  if {[catch {room_export_cell_to_sch $roompath $cell $sch} err]} {
+    tk_messageBox -icon error -message "Failed to open ROOM:\n$err"
     return
   }
-  core_set_binding $sch $corepath
+  room_set_binding $sch $roompath
   xschem load $sch
-  core_apply_cell_names $corepath $cell
-  core_schedule_title_refresh
-  core_schedule_primitive_reload
-  after 300 [list core_netlist_when_ready 0 $cell]
-  core_lock_on_open $corepath
+  room_apply_cell_names $roompath $cell
+  room_schedule_title_refresh
+  room_schedule_primitive_reload
+  after 300 [list room_netlist_when_ready 0 $cell]
+  room_lock_on_open $roompath
 }
 
-proc core_refresh_window_title {{mod {}}} {
+proc room_refresh_window_title {{mod {}}} {
   set sch [xschem get schname]
   if {$sch eq ""} {
     return
   }
-  core_try_bind_payload_sch $sch
-  set corepath [core_get_binding $sch]
-  if {$corepath eq ""} {
+  room_try_bind_payload_sch $sch
+  set roompath [room_get_binding $sch]
+  if {$roompath eq ""} {
     return
   }
-  set label [file tail $corepath]
-  if {[core_lock_is_viewonly $corepath]} {
+  set label [file tail $roompath]
+  if {[room_lock_is_viewonly $roompath]} {
     set label "\[Read-only\] $label"
   }
   if {[catch {set win [xschem get top_path]}] || $win eq {}} {
@@ -828,56 +842,56 @@ proc core_refresh_window_title {{mod {}}} {
     }
     if {[winfo exists .tabs$tabname]} {
       .tabs$tabname configure -text ${label}${mod}
-      catch {balloon .tabs$tabname $corepath}
+      catch {balloon .tabs$tabname $roompath}
     }
   }
 }
 
-proc core_install_title_hooks {} {
+proc room_install_title_hooks {} {
   if {[info commands set_tab_names_orig] ne ""} {
     return
   }
   if {[info commands set_tab_names] eq ""} {
-    after 200 core_install_title_hooks
+    after 200 room_install_title_hooks
     return
   }
   rename set_tab_names set_tab_names_orig
   proc set_tab_names {{mod {}}} {
     set_tab_names_orig $mod
-    core_refresh_window_title $mod
+    room_refresh_window_title $mod
   }
 }
 
-proc core_write {sch corepath} {
-  core_ensure_loaded
-  core_lock_assert_writable $corepath
-  if {![core_is_core_path $corepath]} {
-    error "CORE path must be .schematic.core or .symbol.core: $corepath"
+proc room_write {sch roompath} {
+  room_ensure_loaded
+  room_lock_assert_writable $roompath
+  if {![room_is_room_path $roompath]} {
+    error "ROOM path must be .schematic.room or .symbol.room: $roompath"
   }
-  if {[core_has_native_bridge] && [info commands coreapi_import_data] ne ""} {
+  if {[room_has_native_bridge] && [info commands coreapi_import_data] ne ""} {
     if {[catch {set data [xschem get_data]} err]} {
       error $err
     }
-    if {[catch {coreapi_import_data $data $corepath -lib xschem} err]} {
+    if {[catch {coreapi_import_data $data $roompath -lib xschem} err]} {
       error $err
     }
     catch {xschem set_modify 0}
-  } elseif {[catch {coreapi_import $sch $corepath -lib xschem} err]} {
+  } elseif {[catch {coreapi_import $sch $roompath -lib xschem} err]} {
     error $err
   }
-  core_set_binding $sch $corepath
+  room_set_binding $sch $roompath
 }
 
-proc core_file_open {} {
-  set initdir $::CORE_ROOT/designs/xschem
+proc room_file_open {} {
+  set initdir $::ROOM_ROOT/designs/xschem
   if {![file isdirectory $initdir]} {
-    set initdir $::CORE_ROOT
+    set initdir $::ROOM_ROOT
   }
   set f [tk_getOpenFile -initialdir $initdir \
-    -title "Open schematic, symbol, or CORE file" \
+    -title "Open schematic, symbol, or ROOM file" \
     -filetypes {
-      {{CORE schematic} {.schematic.core}}
-      {{CORE symbol} {.symbol.core}}
+      {{ROOM schematic} {.schematic.room}}
+      {{ROOM symbol} {.symbol.room}}
       {{Xschem schematic} {.sch}}
       {{Xschem symbol} {.sym}}
       {{All files} *}
@@ -885,76 +899,76 @@ proc core_file_open {} {
   if {$f eq ""} {
     return
   }
-  if {[core_is_core_path $f]} {
-    core_open $f
+  if {[room_is_room_path $f]} {
+    room_open $f
   } else {
     xschem load $f
-    core_try_bind_payload_sch [xschem get schname]
-    core_schedule_title_refresh
+    room_try_bind_payload_sch [xschem get schname]
+    room_schedule_title_refresh
   }
 }
 
-proc core_file_save {} {
+proc room_file_save {} {
   set sch [xschem get schname]
   if {$sch eq ""} {
     return
   }
-  if {[core_lock_is_viewonly]} {
-    tk_messageBox -icon warning -message "Document is read-only.\n\n[core_lock_status_text]"
+  if {[room_lock_is_viewonly]} {
+    tk_messageBox -icon warning -message "Document is read-only.\n\n[room_lock_status_text]"
     return
   }
-  set corepath [core_resolve_corepath $sch]
-  if {$corepath ne ""} {
-    core_set_binding $sch $corepath
-    if {[catch {core_write $sch $corepath} err]} {
-      tk_messageBox -icon error -message "CORE save failed:\n$err"
-      core_log_launch "CORE save FAILED: $corepath ($err)"
+  set roompath [room_resolve_roompath $sch]
+  if {$roompath ne ""} {
+    room_set_binding $sch $roompath
+    if {[catch {room_write $sch $roompath} err]} {
+      tk_messageBox -icon error -message "ROOM save failed:\n$err"
+      room_log_launch "ROOM save FAILED: $roompath ($err)"
     } else {
-      core_log_launch "CORE saved: $corepath"
-      catch {core_refresh_window_title " (saved)"}
+      room_log_launch "ROOM saved: $roompath"
+      catch {room_refresh_window_title " (saved)"}
     }
     return
   }
   xschem save
-  core_log_launch "xschem save only (no CORE binding): $sch"
+  room_log_launch "xschem save only (no ROOM binding): $sch"
 }
 
-proc core_file_saveas {} {
-  if {[core_lock_is_viewonly]} {
-    tk_messageBox -icon warning -message "Document is read-only.\n\n[core_lock_status_text]"
+proc room_file_saveas {} {
+  if {[room_lock_is_viewonly]} {
+    tk_messageBox -icon warning -message "Document is read-only.\n\n[room_lock_status_text]"
     return
   }
   set sch [xschem get schname]
   set initdir [file dirname $sch]
   if {$initdir eq "." || $initdir eq ""} {
-    set initdir $::CORE_ROOT/designs/xschem
+    set initdir $::ROOM_ROOT/designs/xschem
   }
   set f [tk_getSaveFile -initialdir $initdir \
-    -title "Save schematic, symbol, or CORE file" \
-    -defaultextension [core_save_defaultextension] \
+    -title "Save schematic, symbol, or ROOM file" \
+    -defaultextension [room_save_defaultextension] \
     -filetypes {
-      {{CORE schematic} {.schematic.core}}
-      {{CORE symbol} {.symbol.core}}
+      {{ROOM schematic} {.schematic.room}}
+      {{ROOM symbol} {.symbol.room}}
       {{Xschem schematic} {.sch}}
       {{Xschem symbol} {.sym}}
     }]
   if {$f eq ""} {
     return
   }
-  if {[core_is_core_path $f]} {
-    if {[core_has_native_bridge]} {
-      if {[catch {core_write [xschem get schname] $f} err]} {
-        tk_messageBox -icon error -message "CORE save failed:\n$err"
+  if {[room_is_room_path $f]} {
+    if {[room_has_native_bridge]} {
+      if {[catch {room_write [xschem get schname] $f} err]} {
+        tk_messageBox -icon error -message "ROOM save failed:\n$err"
         return
       }
-      core_set_binding [xschem get schname] $f
+      room_set_binding [xschem get schname] $f
     } else {
-      set cell [core_cell_from_path $f]
-      set view [core_view_from_path $f]
-      set schout [core_temp_sch_path $cell [core_ext_for_view $view]]
+      set cell [room_cell_from_path $f]
+      set view [room_view_from_path $f]
+      set schout [room_temp_sch_path $cell [room_ext_for_view $view]]
       xschem saveas $schout
-      if {[catch {core_write $schout $f} err]} {
-        tk_messageBox -icon error -message "CORE save failed:\n$err"
+      if {[catch {room_write $schout $f} err]} {
+        tk_messageBox -icon error -message "ROOM save failed:\n$err"
         return
       }
     }
@@ -962,25 +976,25 @@ proc core_file_saveas {} {
     xschem saveas $f
     set newsch [xschem get schname]
     if {$newsch ne ""} {
-      core_clear_binding $newsch
+      room_clear_binding $newsch
     }
   }
 }
 
-proc core_resolve_corepath {{sch ""}} {
+proc room_resolve_roompath {{sch ""}} {
   if {$sch ne ""} {
-    set corepath [core_get_binding $sch]
-    if {$corepath ne ""} {
-      return $corepath
+    set roompath [room_get_binding $sch]
+    if {$roompath ne ""} {
+      return $roompath
     }
   }
-  if {[info exists ::core_active_corepath] && $::core_active_corepath ne ""} {
-    return $::core_active_corepath
+  if {[info exists ::room_active_roompath] && $::room_active_roompath ne ""} {
+    return $::room_active_roompath
   }
   return ""
 }
 
-proc core_log_launch {msg} {
+proc room_log_launch {msg} {
   if {![info exists ::env(XSCHEM_LAUNCH_LOG)] || $::env(XSCHEM_LAUNCH_LOG) eq ""} {
     return
   }
@@ -991,94 +1005,94 @@ proc core_log_launch {msg} {
   }
 }
 
-proc core_install_file_hooks {} {
+proc room_install_file_hooks {} {
   if {[catch {set topwin [xschem get top_path]}]} {
-    after 500 core_install_file_hooks
+    after 500 room_install_file_hooks
     return
   }
   catch {
-    $topwin.menubar.file entryconfigure "Open" -command core_file_open
-    $topwin.menubar.file entryconfigure "Save" -command core_file_save
-    $topwin.menubar.file entryconfigure "Save as" -command core_file_saveas
+    $topwin.menubar.file entryconfigure "Open" -command room_file_open
+    $topwin.menubar.file entryconfigure "Save" -command room_file_save
+    $topwin.menubar.file entryconfigure "Save as" -command room_file_saveas
   }
   catch {
-    bind $topwin <Control-o> {core_file_open ;# %}
-    bind $topwin <Control-s> {core_file_save ;# %}
+    bind $topwin <Control-o> {room_file_open ;# %}
+    bind $topwin <Control-s> {room_file_save ;# %}
   }
-  # Toolbar still uses "xschem save" by default — only writes /tmp/*.sch, not CORE.
+  # Toolbar still uses "xschem save" by default — only writes /tmp/*.sch, not ROOM.
   catch {
     if {[winfo exists $topwin.toolbar.bFileSave]} {
-      $topwin.toolbar.bFileSave configure -command core_file_save
+      $topwin.toolbar.bFileSave configure -command room_file_save
     }
     if {[winfo exists $topwin.toolbar.bFileSaveAs]} {
-      $topwin.toolbar.bFileSaveAs configure -command core_file_saveas
+      $topwin.toolbar.bFileSaveAs configure -command room_file_saveas
     }
   }
-  core_lock_sync_ui
+  room_lock_sync_ui
 }
 
-proc core_save_current {} {
-  if {[core_lock_is_viewonly]} {
-    tk_messageBox -icon warning -message "Document is read-only.\n\n[core_lock_status_text]"
+proc room_save_current {} {
+  if {[room_lock_is_viewonly]} {
+    tk_messageBox -icon warning -message "Document is read-only.\n\n[room_lock_status_text]"
     return
   }
-  core_file_save
+  room_file_save
   set sch [xschem get schname]
   if {$sch eq ""} {
     return
   }
-  if {[core_get_binding $sch] eq ""} {
-    set corepath [core_default_core_path $sch]
-    file mkdir [file dirname $corepath]
-    if {[catch {core_write $sch $corepath} err]} {
-      tk_messageBox -icon error -message "CORE save failed:\n$err"
+  if {[room_get_binding $sch] eq ""} {
+    set roompath [room_default_room_path $sch]
+    file mkdir [file dirname $roompath]
+    if {[catch {room_write $sch $roompath} err]} {
+      tk_messageBox -icon error -message "ROOM save failed:\n$err"
       return
     }
-    core_set_binding $sch $corepath
+    room_set_binding $sch $roompath
   }
 }
 
-proc core_open_default {} {
-  if {[file exists $::CORE_LIB]} {
-    core_open $::CORE_LIB
+proc room_open_default {} {
+  if {[file exists $::ROOM_LIB]} {
+    room_open $::ROOM_LIB
   } else {
-    core_file_open
+    room_file_open
   }
 }
 
-proc core_sync_payload {} {
-  core_ensure_loaded
-  set corepath $::CORE_LIB
-  if {![file exists $corepath]} {
-    tk_messageBox -icon error -message "Default CORE file not found:\n$corepath"
+proc room_sync_payload {} {
+  room_ensure_loaded
+  set roompath $::ROOM_LIB
+  if {![file exists $roompath]} {
+    tk_messageBox -icon error -message "Default ROOM file not found:\n$roompath"
     return
   }
-  set payload [core_payload_dir $corepath]
+  set payload [room_payload_dir $roompath]
   file mkdir $payload
-  if {[catch {coreapi_export_all $corepath $payload} err]} {
-    tk_messageBox -icon error -message "CORE sync failed:\n$err"
+  if {[catch {coreapi_export_all $roompath $payload} err]} {
+    tk_messageBox -icon error -message "ROOM sync failed:\n$err"
     return
   }
   tk_messageBox -icon info -message "Exported all cells to:\n$payload"
 }
 
-proc core_add_menu {} {
+proc room_add_menu {} {
   set topwin [xschem get top_path]
-  set liblabel [file tail $::CORE_LIB]
+  set liblabel [file tail $::ROOM_LIB]
   catch {
-    $topwin.menubar.file insert 4 cascade -label Core -menu $topwin.menubar.core
-    menu $topwin.menubar.core -tearoff 0
-    $topwin.menubar.core add command -label "Open..." -command core_file_open
-    $topwin.menubar.core add command -label "Save" -command core_file_save
-    $topwin.menubar.core add command -label "Save as..." -command core_file_saveas
-    $topwin.menubar.core add separator
-    $topwin.menubar.core add command -label "Open $liblabel" -command core_open_default
-    $topwin.menubar.core add command -label "Save to $liblabel" -command core_save_current
-    $topwin.menubar.core add command -label "Sync payload folder" -command core_sync_payload
+    $topwin.menubar.file insert 4 cascade -label ROOM -menu $topwin.menubar.room
+    menu $topwin.menubar.room -tearoff 0
+    $topwin.menubar.room add command -label "Open..." -command room_file_open
+    $topwin.menubar.room add command -label "Save" -command room_file_save
+    $topwin.menubar.room add command -label "Save as..." -command room_file_saveas
+    $topwin.menubar.room add separator
+    $topwin.menubar.room add command -label "Open $liblabel" -command room_open_default
+    $topwin.menubar.room add command -label "Save to $liblabel" -command room_save_current
+    $topwin.menubar.room add command -label "Sync payload folder" -command room_sync_payload
   }
 }
 
-proc core_ensure_window_geometry {} {
+proc room_ensure_window_geometry {} {
   if {[catch {set win [xschem get topwindow]}]} {
     return
   }
@@ -1107,17 +1121,17 @@ proc core_ensure_window_geometry {} {
   catch {focus $win}
 }
 
-proc core_primitive_cache_dir {} {
-  if {[info exists ::core_primitive_cache] && $::core_primitive_cache ne ""} {
-    return [file normalize $::core_primitive_cache]
+proc room_primitive_cache_dir {} {
+  if {[info exists ::room_primitive_cache] && $::room_primitive_cache ne ""} {
+    return [file normalize $::room_primitive_cache]
   }
   if {[info exists ::env(XSCHEM_PRIMITIVE_CACHE)] && $::env(XSCHEM_PRIMITIVE_CACHE) ne ""} {
     return [file normalize $::env(XSCHEM_PRIMITIVE_CACHE)]
   }
-  return [file join $::CORE_SCRIPT_DIR primitive_cache]
+  return [file join $::ROOM_SCRIPT_DIR primitive_cache]
 }
 
-proc core_split_primitive_libs {raw} {
+proc room_split_primitive_libs {raw} {
   set raw [string trim $raw]
   if {$raw eq ""} {
     return {}
@@ -1131,7 +1145,7 @@ proc core_split_primitive_libs {raw} {
   }
   set normalized {}
   foreach p $parts {
-    set p [core_normalize_primitive_path $p]
+    set p [room_normalize_primitive_path $p]
     if {$p ne ""} {
       lappend normalized $p
     }
@@ -1140,7 +1154,7 @@ proc core_split_primitive_libs {raw} {
 }
 
 # LibMan on Windows writes C:\... paths; WSL xschem needs /mnt/c/...
-proc core_normalize_primitive_path {path} {
+proc room_normalize_primitive_path {path} {
   set path [string trim $path]
   if {$path eq ""} {
     return ""
@@ -1155,8 +1169,8 @@ proc core_normalize_primitive_path {path} {
   return $path
 }
 
-proc core_lib_prefix_from_corepath {corepath} {
-  set parent [file dirname $corepath]
+proc room_lib_prefix_from_roompath {roompath} {
+  set parent [file dirname $roompath]
   set lib_dir [file tail [file dirname $parent]]
   if {$lib_dir eq "" || $lib_dir eq "."} {
     return ""
@@ -1164,16 +1178,16 @@ proc core_lib_prefix_from_corepath {corepath} {
   return $lib_dir
 }
 
-proc core_register_symbol_key {key corepath} {
-  if {$key eq "" || $corepath eq ""} {
+proc room_register_symbol_key {key roompath} {
+  if {$key eq "" || $roompath eq ""} {
     return
   }
-  set ::core_symbol_index($key) $corepath
+  set ::room_symbol_index($key) $roompath
 }
 
 # Xschem built-in devices (lab_pin, lab_wire, code_shown, …): referenced as
 # lab_pin.sym or devices/lab_pin.sym depending on export source.
-proc core_system_device_library_roots {} {
+proc room_system_device_library_roots {} {
   set roots {}
   foreach lib {
     [file join $env(HOME) .local share xschem xschem_library]
@@ -1186,10 +1200,10 @@ proc core_system_device_library_roots {} {
   return $roots
 }
 
-proc core_register_system_devices {} {
-  array unset ::core_system_device_index
-  array set ::core_system_device_index {}
-  foreach root [core_system_device_library_roots] {
+proc room_register_system_devices {} {
+  array unset ::room_system_device_index
+  array set ::room_system_device_index {}
+  foreach root [room_system_device_library_roots] {
     set devdir [file join $root devices]
     if {![file isdirectory $devdir]} {
       continue
@@ -1197,24 +1211,24 @@ proc core_register_system_devices {} {
     foreach sym [glob -nocomplain -directory $devdir *.sym] {
       set name [file tail $sym]
       set norm [file normalize $sym]
-      set ::core_system_device_index($name) $norm
-      set ::core_system_device_index("devices/$name") $norm
+      set ::room_system_device_index($name) $norm
+      set ::room_system_device_index("devices/$name") $norm
     }
   }
 }
 
-proc core_resolve_system_device {symref} {
+proc room_resolve_system_device {symref} {
   if {$symref eq ""} {
     return ""
   }
-  if {[info exists ::core_system_device_index($symref)]} {
-    return $::core_system_device_index($symref)
+  if {[info exists ::room_system_device_index($symref)]} {
+    return $::room_system_device_index($symref)
   }
   set tail [file tail $symref]
-  if {$tail ne $symref && [info exists ::core_system_device_index($tail)]} {
-    return $::core_system_device_index($tail)
+  if {$tail ne $symref && [info exists ::room_system_device_index($tail)]} {
+    return $::room_system_device_index($tail)
   }
-  foreach root [core_system_device_library_roots] {
+  foreach root [room_system_device_library_roots] {
     foreach candidate [list $symref $tail "devices/$tail"] {
       set path [file join $root $candidate]
       if {[file exists $path]} {
@@ -1229,22 +1243,22 @@ proc core_resolve_system_device {symref} {
   return ""
 }
 
-proc core_cell_from_symbol_core {corepath} {
-  set tail [file tail $corepath]
-  if {[regexp {^(.+)\.symbol\.core$} $tail -> cell]} {
+proc room_cell_from_symbol_room {roompath} {
+  set tail [file tail $roompath]
+  if {[regexp {^(.+)\.symbol\.(room|core)$} $tail -> cell]} {
     return $cell
   }
   return ""
 }
 
-proc core_primitive_lib_paths {} {
+proc room_primitive_lib_paths {} {
   set cores {}
-  if {[info exists ::env(CORE_PRIMITIVE_LIBS_FILE)] && $::env(CORE_PRIMITIVE_LIBS_FILE) ne ""} {
-    set listfile $::env(CORE_PRIMITIVE_LIBS_FILE)
+  if {[info exists ::env(ROOM_PRIMITIVE_LIBS_FILE)] && $::env(ROOM_PRIMITIVE_LIBS_FILE) ne ""} {
+    set listfile $::env(ROOM_PRIMITIVE_LIBS_FILE)
     if {[file exists $listfile]} {
       if {[catch {set fh [open $listfile r]} err] == 0} {
         while {[gets $fh line] >= 0} {
-          set line [core_normalize_primitive_path [string trim $line]]
+          set line [room_normalize_primitive_path [string trim $line]]
           if {$line ne ""} {
             lappend cores $line
           }
@@ -1256,22 +1270,22 @@ proc core_primitive_lib_paths {} {
   if {[llength $cores] > 0} {
     return $cores
   }
-  if {[info exists ::env(CORE_PRIMITIVE_LIBS)] && $::env(CORE_PRIMITIVE_LIBS) ne ""} {
-    return [core_split_primitive_libs $::env(CORE_PRIMITIVE_LIBS)]
+  if {[info exists ::env(ROOM_PRIMITIVE_LIBS)] && $::env(ROOM_PRIMITIVE_LIBS) ne ""} {
+    return [room_split_primitive_libs $::env(ROOM_PRIMITIVE_LIBS)]
   }
-  if {[info exists ::env(CORE_PRIMITIVE_LIB)] && $::env(CORE_PRIMITIVE_LIB) ne ""} {
-    return [list $::env(CORE_PRIMITIVE_LIB)]
+  if {[info exists ::env(ROOM_PRIMITIVE_LIB)] && $::env(ROOM_PRIMITIVE_LIB) ne ""} {
+    return [list $::env(ROOM_PRIMITIVE_LIB)]
   }
   return {}
 }
 
-proc core_build_symbol_index {} {
-  array unset ::core_symbol_index
-  array set ::core_symbol_index {}
-  array unset ::core_symbol_materialized
-  array set ::core_symbol_materialized {}
+proc room_build_symbol_index {} {
+  array unset ::room_symbol_index
+  array set ::room_symbol_index {}
+  array unset ::room_symbol_materialized
+  array set ::room_symbol_materialized {}
 
-  set cores [core_primitive_lib_paths]
+  set cores [room_primitive_lib_paths]
   if {[llength $cores] == 0} {
     return
   }
@@ -1281,44 +1295,44 @@ proc core_build_symbol_index {} {
     set techlib $::env(LIBMAN_TECH_LIBRARY)
   }
 
-  foreach corepath $cores {
-    set corepath [core_normalize_primitive_path [string trim $corepath]]
-    if {$corepath eq "" || ![file exists $corepath]} {
+  foreach roompath $cores {
+    set roompath [room_normalize_primitive_path [string trim $roompath]]
+    if {$roompath eq "" || ![file exists $roompath]} {
       continue
     }
-    set cell [core_cell_from_symbol_core $corepath]
+    set cell [room_cell_from_symbol_room $roompath]
     if {$cell eq ""} {
       continue
     }
-    core_register_symbol_key "$cell.sym" $corepath
-    set libpfx [core_lib_prefix_from_corepath $corepath]
+    room_register_symbol_key "$cell.sym" $roompath
+    set libpfx [room_lib_prefix_from_roompath $roompath]
     if {$libpfx ne ""} {
-      core_register_symbol_key "$libpfx/$cell.sym" $corepath
+      room_register_symbol_key "$libpfx/$cell.sym" $roompath
     }
     if {$libpfx eq "commonLib"} {
-      core_register_symbol_key "devices/$cell.sym" $corepath
+      room_register_symbol_key "devices/$cell.sym" $roompath
     }
     # Simulation controllers / sources are analogLib; keep analogLib/ keys even if a
-    # legacy CORE still lives under commonLib (resolver remaps commonLib -> analogLib).
+    # legacy ROOM still lives under commonLib (resolver remaps commonLib -> analogLib).
     foreach simcell {launcher INCLSCR TR Vdc Vac Vpulse Vexp Vrect Idc Iac Ipulse GND vdd vss} {
       if {$cell eq $simcell} {
-        core_register_symbol_key "analogLib/$cell.sym" $corepath
+        room_register_symbol_key "analogLib/$cell.sym" $roompath
         break
       }
     }
     if {$libpfx eq "analogLib" && $cell eq "launcher"} {
       # Bare name for older schematics that still say C {launcher.sym}
-      core_register_symbol_key "launcher.sym" $corepath
+      room_register_symbol_key "launcher.sym" $roompath
     }
     if {$techlib ne ""} {
       foreach tlib [split $techlib {;}] {
         set tlib [string trim $tlib]
         if {$tlib ne ""} {
-          core_register_symbol_key "$tlib/$cell.sym" $corepath
+          room_register_symbol_key "$tlib/$cell.sym" $roompath
         }
       }
     }
-    core_register_symbol_key [file tail $corepath] $corepath
+    room_register_symbol_key [file tail $roompath] $roompath
 
     # Qucs Model names <-> Xschem devices/*.sym aliases (analogLib / commonLib)
     switch -exact -- $cell {
@@ -1351,40 +1365,40 @@ proc core_build_symbol_index {} {
       default { set aliases {} }
     }
     foreach alias $aliases {
-      core_register_symbol_key "$alias.sym" $corepath
+      room_register_symbol_key "$alias.sym" $roompath
       if {$techlib ne ""} {
         foreach tlib [split $techlib {;}] {
           set tlib [string trim $tlib]
           if {$tlib ne ""} {
-            core_register_symbol_key "$tlib/$alias.sym" $corepath
+            room_register_symbol_key "$tlib/$alias.sym" $roompath
           }
         }
       }
     }  }
 }
 
-proc core_materialize_symbol {symref} {
-  if {![info exists ::core_symbol_index($symref)]} {
+proc room_materialize_symbol {symref} {
+  if {![info exists ::room_symbol_index($symref)]} {
     return ""
   }
-  if {[info exists ::core_symbol_materialized($symref)]} {
-    return $::core_symbol_materialized($symref)
+  if {[info exists ::room_symbol_materialized($symref)]} {
+    return $::room_symbol_materialized($symref)
   }
 
-  set corepath $::core_symbol_index($symref)
-  core_ensure_loaded
-  set parsed [coreapi_parse_core_path $corepath]
+  set roompath $::room_symbol_index($symref)
+  room_ensure_loaded
+  set parsed [coreapi_parse_core_path $roompath]
   lassign $parsed cell view
   if {$cell eq ""} {
     return ""
   }
 
-  set cache [core_primitive_cache_dir]
+  set cache [room_primitive_cache_dir]
   set outdir $cache
   if {[string first "/" $symref] >= 0} {
     set outdir [file join $cache [file dirname $symref]]
   } else {
-    set libpfx [core_lib_prefix_from_corepath $corepath]
+    set libpfx [room_lib_prefix_from_roompath $roompath]
     if {$libpfx ne ""} {
       set outdir [file join $cache $libpfx]
     } elseif {[info exists ::env(LIBMAN_TECH_LIBRARY)] && $::env(LIBMAN_TECH_LIBRARY) ne ""} {
@@ -1399,45 +1413,45 @@ proc core_materialize_symbol {symref} {
   }
   file mkdir $outdir
   set sym [file join $outdir "$cell.sym"]
-  if {[catch {coreapi_export_cell $corepath $cell $sym} err]} {
-    puts stderr "Failed to materialize CORE symbol $symref from $corepath: $err"
+  if {[catch {coreapi_export_cell $roompath $cell $sym} err]} {
+    puts stderr "Failed to materialize ROOM symbol $symref from $roompath: $err"
     return ""
   }
-  set ::core_symbol_materialized($symref) $sym
-  core_refresh_pathlist
+  set ::room_symbol_materialized($symref) $sym
+  room_refresh_pathlist
   return $sym
 }
 
-proc core_schedule_primitive_reload {} {
+proc room_schedule_primitive_reload {} {
   foreach delay {50 400 1200} {
-    after $delay core_finish_primitive_setup
+    after $delay room_finish_primitive_setup
   }
 }
 
-proc core_finish_primitive_setup {} {
-  core_build_symbol_index
-  core_refresh_pathlist
-  if {![info exists ::core_primitive_setup_done]} {
-    set ::core_primitive_setup_done 1
+proc room_finish_primitive_setup {} {
+  room_build_symbol_index
+  room_refresh_pathlist
+  if {![info exists ::room_primitive_setup_done]} {
+    set ::room_primitive_setup_done 1
   }
   catch {xschem reload_symbols}
   catch {xschem redraw}
 }
 
-proc core_resolve_symbol_file {f} {
-  set sys [core_resolve_system_device $f]
+proc room_resolve_symbol_file {f} {
+  set sys [room_resolve_system_device $f]
   if {$sys ne ""} {
     return $sys
   }
-  if {![info exists ::core_primitive_setup_done]} {
+  if {![info exists ::room_primitive_setup_done]} {
     return ""
   }
   foreach key [list $f [file tail $f]] {
     if {$key eq ""} {
       continue
     }
-    if {[info exists ::core_symbol_index($key)]} {
-      set sym [core_materialize_symbol $key]
+    if {[info exists ::room_symbol_index($key)]} {
+      set sym [room_materialize_symbol $key]
       if {$sym ne "" && [file exists $sym]} {
         return $sym
       }
@@ -1446,7 +1460,7 @@ proc core_resolve_symbol_file {f} {
   return ""
 }
 
-proc core_install_symbol_hooks {} {
+proc room_install_symbol_hooks {} {
   if {[info commands find_file_first] eq ""} {
     return
   }
@@ -1455,7 +1469,7 @@ proc core_install_symbol_hooks {} {
   }
   rename find_file_first find_file_first_orig
   proc find_file_first {f {paths {}} {maxdepth -1}} {
-    return [core_pick_symbol_file $f $paths $maxdepth]
+    return [room_pick_symbol_file $f $paths $maxdepth]
   }
 
   if {[info commands find_file] eq ""} {
@@ -1463,7 +1477,7 @@ proc core_install_symbol_hooks {} {
   }
   rename find_file find_file_orig
   proc find_file {f {paths {}} {maxdepth -1}} {
-    set picked [core_pick_symbol_file $f $paths $maxdepth]
+    set picked [room_pick_symbol_file $f $paths $maxdepth]
     if {$picked ne ""} {
       return [list $picked]
     }
@@ -1472,7 +1486,7 @@ proc core_install_symbol_hooks {} {
 }
 
 # load_sym_def() resolves symbols via Tcl abs_sym_path, not find_file.
-proc core_install_abs_sym_path_hook {} {
+proc room_install_abs_sym_path_hook {} {
   if {[info commands abs_sym_path] eq ""} {
     return
   }
@@ -1485,7 +1499,7 @@ proc core_install_abs_sym_path_hook {} {
     if {$ext ne {}} {
       set lookup [file rootname $fname]$ext
     }
-    set picked [core_pick_symbol_file $lookup $paths]
+    set picked [room_pick_symbol_file $lookup $paths]
     if {$picked ne "" && [file exists $picked]} {
       return $picked
     }
@@ -1493,19 +1507,19 @@ proc core_install_abs_sym_path_hook {} {
   }
 }
 
-proc core_setup_primitive_library {} {
-  core_build_symbol_index
-  core_refresh_pathlist
-  core_install_symbol_hooks
-  core_install_abs_sym_path_hook
+proc room_setup_primitive_library {} {
+  room_build_symbol_index
+  room_refresh_pathlist
+  room_install_symbol_hooks
+  room_install_abs_sym_path_hook
 }
 
-proc core_refresh_pathlist {} {
+proc room_refresh_pathlist {} {
   global pathlist
   if {![info exists pathlist]} {
     return
   }
-  set cache [core_primitive_cache_dir]
+  set cache [room_primitive_cache_dir]
   if {$cache eq "" || ![file isdirectory $cache]} {
     return
   }
@@ -1513,7 +1527,7 @@ proc core_refresh_pathlist {} {
     lappend pathlist $cache
   }
   # Always expose tier dirs so analogLib/foo.sym and commonLib/bar.sym resolve
-  # from the seeded primitive_cache even before CORE materialization.
+  # from the seeded primitive_cache even before ROOM materialization.
   foreach tier {analogLib commonLib devices} {
     set sub [file join $cache $tier]
     if {[file isdirectory $sub] && [lsearch -exact $pathlist $sub] < 0} {
@@ -1534,12 +1548,12 @@ proc core_refresh_pathlist {} {
   }
 }
 
-proc core_open_deferred {} {
-  if {[info exists ::env(XSCHEM_OPEN_CORE)] && $::env(XSCHEM_OPEN_CORE) ne ""} {
-    set path $::env(XSCHEM_OPEN_CORE)
-    unset ::env(XSCHEM_OPEN_CORE)
-    if {[catch {core_open $path} err]} {
-      tk_messageBox -icon error -message "CORE open failed:\n$err"
+proc room_open_deferred {} {
+  if {[info exists ::env(XSCHEM_OPEN_ROOM)] && $::env(XSCHEM_OPEN_ROOM) ne ""} {
+    set path $::env(XSCHEM_OPEN_ROOM)
+    unset ::env(XSCHEM_OPEN_ROOM)
+    if {[catch {room_open $path} err]} {
+      tk_messageBox -icon error -message "ROOM open failed:\n$err"
     }
     return
   }
@@ -1550,13 +1564,13 @@ proc core_open_deferred {} {
     if {[catch {xschem load $path} err]} {
       tk_messageBox -icon error -message "Failed to open:\n$path\n\n$err"
     } else {
-      core_try_bind_payload_sch [xschem get schname]
-      core_schedule_title_refresh
+      room_try_bind_payload_sch [xschem get schname]
+      room_schedule_title_refresh
     }
   }
 }
 
-proc core_install_wsl_execute_hook {} {
+proc room_install_wsl_execute_hook {} {
   if {[info commands execute_fileevent_orig] ne ""} {
     return
   }
@@ -1564,7 +1578,7 @@ proc core_install_wsl_execute_hook {} {
     return
   }
   if {[info commands execute_fileevent] eq ""} {
-    after 200 core_install_wsl_execute_hook
+    after 200 room_install_wsl_execute_hook
     return
   }
   rename execute_fileevent execute_fileevent_orig
@@ -1633,14 +1647,14 @@ proc core_install_wsl_execute_hook {} {
     }
     set d $netlist_dir
     set batch_err ""
-    set nf [core_ensure_netlist $d "" batch_err]
+    set nf [room_ensure_netlist $d "" batch_err]
     if {![file exists $nf]} {
       set msg "Netlist not found."
       if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
       tk_messageBox -icon warning -message $msg
       return {}
     }
-    if {![core_netlist_looks_valid $nf]} {
+    if {![room_netlist_looks_valid $nf]} {
       set msg "Netlist has unresolved symbols (template=... or IS MISSING).\n\n$nf"
       if {$batch_err ne ""} { append msg "\n\nBatch netlist:\n$batch_err" }
       tk_messageBox -icon warning -message $msg
@@ -1657,26 +1671,26 @@ proc core_install_wsl_execute_hook {} {
   }
 }
 
-# Fast filename-only index before CORE load; reload_symbols again after open/scripts.
+# Fast filename-only index before ROOM load; reload_symbols again after open/scripts.
 after idle {
-  core_install_title_hooks
-  core_install_file_hooks
-  core_install_simulate_hook
-  core_install_wsl_execute_hook
-  core_add_menu
-  core_install_symbol_hooks
-  core_install_abs_sym_path_hook
-  core_lock_install_hooks
-  core_register_system_devices
-  core_build_symbol_index
-  core_refresh_pathlist
-  set ::core_primitive_setup_done 1
-  core_open_deferred
-  after 50 core_ensure_window_geometry
-  after 150 core_ensure_window_geometry
-  after 600 core_ensure_window_geometry
-  after 1500 core_ensure_window_geometry
-  after 800 core_install_file_hooks
-  after 2000 core_install_file_hooks
-  core_schedule_primitive_reload
+  room_install_title_hooks
+  room_install_file_hooks
+  room_install_simulate_hook
+  room_install_wsl_execute_hook
+  room_add_menu
+  room_install_symbol_hooks
+  room_install_abs_sym_path_hook
+  room_lock_install_hooks
+  room_register_system_devices
+  room_build_symbol_index
+  room_refresh_pathlist
+  set ::room_primitive_setup_done 1
+  room_open_deferred
+  after 50 room_ensure_window_geometry
+  after 150 room_ensure_window_geometry
+  after 600 room_ensure_window_geometry
+  after 1500 room_ensure_window_geometry
+  after 800 room_install_file_hooks
+  after 2000 room_install_file_hooks
+  room_schedule_primitive_reload
 }

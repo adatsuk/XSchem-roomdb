@@ -8,27 +8,27 @@ on:
 
 jobs:
   build-xschem-rocky8:
-    name: xschem + CORE (Rocky Linux 8)
+    name: xschem + ROOM (Rocky Linux 8)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     container:
       image: rockylinux:8
 
     steps:
-      - name: Checkout XSchem-coredb
+      - name: Checkout XSchem-roomdb
         uses: actions/checkout@v4
         with:
-          path: XSchem-coredb
+          path: XSchem-roomdb
 
       - name: Checkout CommonDB
         uses: actions/checkout@v4
         with:
-          repository: IHP-GmbH/CommonDB
+          repository: IHP-GmbH/Room
           path: CommonDB
           token: ${{ secrets.GH_PAT }}
 
       - name: Install dependencies
-        run: bash XSchem-coredb/scripts/ci-rocky8-deps.sh
+        run: bash XSchem-roomdb/scripts/ci-rocky8-deps.sh
 
       - name: Cache Cap'n Proto (Linux)
         uses: actions/cache@v4
@@ -49,28 +49,28 @@ jobs:
 
       - name: Build and install xschem
         run: |
-          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
+          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-roomdb"
           export INSTALL_PREFIX="$XSCHEM_ROOT/dist-install"
           sed -i 's/\r$//' "$XSCHEM_ROOT/scripts/build-xschem-ci.sh"
           bash "$XSCHEM_ROOT/scripts/build-xschem-ci.sh"
 
-      - name: Build coretcl.so
+      - name: Build roomtcl.so
         run: |
-          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
+          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-roomdb"
           export COMMONDB_ROOT="$GITHUB_WORKSPACE/CommonDB"
-          sed -i 's/\r$//' "$XSCHEM_ROOT/build-core-tcl.sh" "$COMMONDB_ROOT/scripts/build_capnp_linux.sh"
-          bash "$XSCHEM_ROOT/build-core-tcl.sh"
-          test -f "$XSCHEM_ROOT/integrations/coretcl.so"
+          sed -i 's/\r$//' "$XSCHEM_ROOT/build-room-tcl.sh" "$COMMONDB_ROOT/scripts/build_capnp_linux.sh"
+          bash "$XSCHEM_ROOT/build-room-tcl.sh"
+          test -f "$XSCHEM_ROOT/integrations/roomtcl.so"
 
       - name: Verify binaries
         run: |
-          PREFIX="$GITHUB_WORKSPACE/XSchem-coredb/dist-install"
+          PREFIX="$GITHUB_WORKSPACE/XSchem-roomdb/dist-install"
           test -x "$PREFIX/bin/xschem"
-          test -f "$GITHUB_WORKSPACE/XSchem-coredb/integrations/coretcl.so"
+          test -f "$GITHUB_WORKSPACE/XSchem-roomdb/integrations/roomtcl.so"
 
       - name: Package portable bundle
         run: |
-          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
+          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-roomdb"
           export CAPNP_ROOT="$GITHUB_WORKSPACE/CommonDB/third_party/capnp-install-linux"
           sed -i 's/\r$//' \
             "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh" \
@@ -84,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: xschem-rocky8
-          path: XSchem-coredb/xschem-rocky8-bundle.tar.gz
+          path: XSchem-roomdb/xschem-rocky8-bundle.tar.gz
 
   build-ubuntu24:
     name: build-ubuntu24
@@ -92,23 +92,23 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout XSchem-coredb
+      - name: Checkout XSchem-roomdb
         uses: actions/checkout@v4
         with:
-          path: XSchem-coredb
+          path: XSchem-roomdb
 
       - name: Checkout CommonDB
         uses: actions/checkout@v4
         with:
-          repository: IHP-GmbH/CommonDB
+          repository: IHP-GmbH/Room
           path: CommonDB
           token: ${{ secrets.GH_PAT }}
 
       - name: Verify CommonDB checkout
-        run: test -f CommonDB/src/core_paths.h
+        run: test -f CommonDB/src/room_paths.h
 
       - name: Install dependencies
-        run: bash XSchem-coredb/scripts/ci-ubuntu24-deps.sh
+        run: bash XSchem-roomdb/scripts/ci-ubuntu24-deps.sh
 
       - name: Cache Cap'n Proto (Linux)
         uses: actions/cache@v4
@@ -129,28 +129,28 @@ jobs:
 
       - name: Build and install xschem
         run: |
-          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
+          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-roomdb"
           export INSTALL_PREFIX="$XSCHEM_ROOT/dist-install"
           sed -i 's/\r$//' "$XSCHEM_ROOT/scripts/build-xschem-ci.sh"
           bash "$XSCHEM_ROOT/scripts/build-xschem-ci.sh"
 
-      - name: Build coretcl.so
+      - name: Build roomtcl.so
         run: |
-          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
+          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-roomdb"
           export COMMONDB_ROOT="$GITHUB_WORKSPACE/CommonDB"
-          sed -i 's/\r$//' "$XSCHEM_ROOT/build-core-tcl.sh" "$COMMONDB_ROOT/scripts/build_capnp_linux.sh"
-          bash "$XSCHEM_ROOT/build-core-tcl.sh"
-          test -f "$XSCHEM_ROOT/integrations/coretcl.so"
+          sed -i 's/\r$//' "$XSCHEM_ROOT/build-room-tcl.sh" "$COMMONDB_ROOT/scripts/build_capnp_linux.sh"
+          bash "$XSCHEM_ROOT/build-room-tcl.sh"
+          test -f "$XSCHEM_ROOT/integrations/roomtcl.so"
 
       - name: Verify binaries
         run: |
-          PREFIX="$GITHUB_WORKSPACE/XSchem-coredb/dist-install"
+          PREFIX="$GITHUB_WORKSPACE/XSchem-roomdb/dist-install"
           test -x "$PREFIX/bin/xschem"
-          test -f "$GITHUB_WORKSPACE/XSchem-coredb/integrations/coretcl.so"
+          test -f "$GITHUB_WORKSPACE/XSchem-roomdb/integrations/roomtcl.so"
 
       - name: Package portable bundle
         run: |
-          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-coredb"
+          export XSCHEM_ROOT="$GITHUB_WORKSPACE/XSchem-roomdb"
           export CAPNP_ROOT="$GITHUB_WORKSPACE/CommonDB/third_party/capnp-install-linux"
           sed -i 's/\r$//' \
             "$XSCHEM_ROOT/scripts/package_xschem_linux_bundle.sh" \
@@ -163,9 +163,9 @@ jobs:
       - name: Smoke-test bundled binary (headless)
         run: |
           set -euxo pipefail
-          tar -xzf XSchem-coredb/xschem-ubuntu24-bundle.tar.gz -C XSchem-coredb
-          test -x XSchem-coredb/dist-bundle/xschem-run.sh
-          if ! timeout 8s xvfb-run -a XSchem-coredb/dist-bundle/xschem-run.sh; then
+          tar -xzf XSchem-roomdb/xschem-ubuntu24-bundle.tar.gz -C XSchem-roomdb
+          test -x XSchem-roomdb/dist-bundle/xschem-run.sh
+          if ! timeout 8s xvfb-run -a XSchem-roomdb/dist-bundle/xschem-run.sh; then
             status=$?
             if [[ "${status}" -ne 124 ]]; then
               echo "Smoke test failed with exit ${status}" >&2
@@ -177,5 +177,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: xschem-ubuntu24
-          path: XSchem-coredb/xschem-ubuntu24-bundle.tar.gz
+          path: XSchem-roomdb/xschem-ubuntu24-bundle.tar.gz
           retention-days: 14
