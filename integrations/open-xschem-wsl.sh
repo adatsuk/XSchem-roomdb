@@ -75,6 +75,8 @@ sync_ihp_pdk_native_cache() {
   mkdir -p "$cache/ihp-sg13g2/libs.tech/ngspice/models" \
            "$cache/ihp-sg13g2/libs.tech/ngspice/osdi" \
            "$cache/ihp-sg13g2/libs.tech/xschem"
+  # Models/OSDI are small (~6MB). Full PDK xschem/ from /mnt/c can take minutes on 9p —
+  # only sync when the cache is empty (or FORCE_PDK_SYNC=1).
   if [[ -n "$models_src" ]]; then
     rsync -a --size-only "$models_src/" "$cache/ihp-sg13g2/libs.tech/ngspice/models/"
   fi
@@ -82,7 +84,10 @@ sync_ihp_pdk_native_cache() {
     rsync -a --size-only "$osdi_src/" "$cache/ihp-sg13g2/libs.tech/ngspice/osdi/"
   fi
   if [[ -n "$xschem_src" ]]; then
-    rsync -a --size-only "$xschem_src/" "$cache/ihp-sg13g2/libs.tech/xschem/"
+    local xschem_dst="$cache/ihp-sg13g2/libs.tech/xschem"
+    if [[ "${FORCE_PDK_SYNC:-0}" == "1" || -z "$(ls -A "$xschem_dst" 2>/dev/null || true)" ]]; then
+      rsync -a --size-only "$xschem_src/" "$xschem_dst/"
+    fi
   fi
 
   export PDK_ROOT="$cache"
@@ -113,6 +118,49 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 XSCHEM_ROOT="${XSCHEM_ROOT:-${XSCHEM_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}}"
 XSCHEM_RC="${XSCHEM_RC:-$XSCHEM_ROOT/xschemrc}"
 
+# Mirror xschemrc + integrations onto native WSL ext4. Sourcing Tcl and loading
+# roomtcl.so from /mnt/c (9p) is a large part of the 20–40s LibMan open time.
+sync_xschem_native_tree() {
+  case "$XSCHEM_ROOT" in
+    /mnt/*) ;;
+    *) return 0 ;;
+  esac
+
+  local cache="${XSCHEM_NATIVE_CACHE:-$HOME/.cache/libman-xschem/tree}"
+  mkdir -p "$cache/integrations"
+
+  # Prefer cheap updates of the hot path (room.tcl / roomtcl.so / xschemrc).
+  # Full integrations/ rsync across 9p was a common multi-minute stall.
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --size-only "$XSCHEM_ROOT/xschemrc" "$cache/xschemrc"
+    rsync -a --size-only \
+      --include 'room.tcl' --include 'room_lock.tcl' --include 'roomtcl.so' --include 'coretcl.so' \
+      --exclude '*' \
+      "$XSCHEM_ROOT/integrations/" "$cache/integrations/"
+  else
+    cp -u "$XSCHEM_ROOT/xschemrc" "$cache/xschemrc"
+    cp -u "$XSCHEM_ROOT/integrations/"room.tcl "$cache/integrations/" 2>/dev/null || true
+    cp -u "$XSCHEM_ROOT/integrations/"room_lock.tcl "$cache/integrations/" 2>/dev/null || true
+    cp -u "$XSCHEM_ROOT/integrations/"*.so "$cache/integrations/" 2>/dev/null || true
+  fi
+
+  if [[ -f "$cache/xschemrc" && -f "$cache/integrations/room.tcl" ]]; then
+    XSCHEM_ROOT="$cache"
+    XSCHEM_RC="$cache/xschemrc"
+  fi
+}
+
+_t0="$(date +%s%3N 2>/dev/null || date +%s)"
+log_timing() {
+  local now label="$1"
+  now="$(date +%s%3N 2>/dev/null || date +%s)"
+  if [[ "$now" =~ ^[0-9]+$ && "$_t0" =~ ^[0-9]+$ ]]; then
+    log_launch "timing ${label}: $((now - _t0))ms"
+  else
+    log_launch "timing ${label}"
+  fi
+}
+
 export XSCHEM_ROOT
 if [[ -n "${COMMONDB_ROOT:-}" ]]; then
   export COMMONDB_ROOT
@@ -141,7 +189,7 @@ normalize_primitive_path() {
 
 split_primitive_libs() {
   local raw="$1"
-  local -a arr
+  local -a ar
   if [[ "$raw" == *";"* ]]; then
     IFS=';' read -r -a arr <<< "$raw"
   else
@@ -189,14 +237,40 @@ if [[ -n "${ROOM_PRIMITIVE_LIB:-}" || -n "${ROOM_PRIMITIVE_LIBS:-}" ]]; then
   mkdir -p "$XSCHEM_PRIMITIVE_CACHE"
 fi
 
-if [[ $# -lt 1 ]]; then
-  echo "usage: $0 <sch|sym|schematic.room|symbol.room>" >&2
-  exit 1
+# Warm-only path: bring the WSL2 VM up and refresh native caches without opening Xschem.
+if [[ "${1:-}" == "--warm" ]]; then
+  LAUNCH_LOG="${XSCHEM_LAUNCH_LOG:-${TMPDIR:-/tmp}/xschem-libman-launch.log}"
+  log_launch() {
+    printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date)" "$*" >>"$LAUNCH_LOG"
+  }
+  log_launch "warm start"
+  sync_xschem_native_tree
+  export XSCHEM_ROOT
+  log_launch "warm tree XSCHEM_ROOT=$XSCHEM_ROOT PDK_ROOT=${PDK_ROOT:-}"
+
+  # Also prime WSLg + xschem process path so the first interactive open is shorter.
+  export DISPLAY="${DISPLAY:-:0}"
+  export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}"
+  export GDK_BACKEND="${GDK_BACKEND:-x11}"
+  XSCHEM_BIN=""
+  if command -v xschem >/dev/null 2>&1; then
+    XSCHEM_BIN="$(command -v xschem)"
+  elif [[ -x "$HOME/.local/bin/xschem" ]]; then
+    XSCHEM_BIN="$HOME/.local/bin/xschem"
+  fi
+  if [[ -n "$XSCHEM_BIN" && -f "${XSCHEM_RC:-}" ]]; then
+    log_launch "warm xschem -q via $XSCHEM_BIN"
+    timeout 15s "$XSCHEM_BIN" --rcfile "$XSCHEM_RC" -q >>"$LAUNCH_LOG" 2>&1 || true
+  else
+    log_launch "warm skip xschem (bin='${XSCHEM_BIN:-}' rc='${XSCHEM_RC:-}')"
+  fi
+  log_launch "warm done"
+  exit 0
 fi
 
-if [[ ! -f "$XSCHEM_RC" ]]; then
-  echo "xschemrc not found: $XSCHEM_RC" >&2
-  echo "Set XSCHEM_ROOT or XSCHEM_RC if the repo is not next to this script." >&2
+if [[ $# -lt 1 ]]; then
+  echo "usage: $0 <sch|sym|schematic.room|symbol.room>|--warm" >&2
   exit 1
 fi
 
@@ -207,6 +281,16 @@ log_launch() {
   printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date)" "$*" >>"$LAUNCH_LOG"
 }
 log_launch "argv: $*"
+sync_xschem_native_tree
+export XSCHEM_ROOT
+log_launch "XSCHEM_ROOT=$XSCHEM_ROOT XSCHEM_RC=$XSCHEM_RC"
+log_timing "after native tree sync"
+
+if [[ ! -f "$XSCHEM_RC" ]]; then
+  echo "xschemrc not found: $XSCHEM_RC" >&2
+  echo "Set XSCHEM_ROOT or XSCHEM_RC if the repo is not next to this script." >&2
+  exit 1
+fi
 
 # If LibMan passed a Windows path, normalize to WSL (/mnt/c/...).
 if [[ "$INPUT" =~ ^/mnt/ ]]; then
@@ -272,7 +356,8 @@ scrub_geometry_file "$INPUT"
 export DISPLAY="${DISPLAY:-:0}"
 export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}"
-export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+# X11 is typically snappier than Wayland under WSLg for Xschem.
+export GDK_BACKEND="${GDK_BACKEND:-x11}"
 
 ensure_wslg_display() {
   local disp="${DISPLAY#:}"
@@ -320,6 +405,7 @@ fi
 log_launch "starting $XSCHEM_BIN for $INPUT"
 log_launch "DISPLAY=${DISPLAY:-} WAYLAND=${WAYLAND_DISPLAY:-} XDG=${XDG_RUNTIME_DIR:-}"
 log_launch "PDK_ROOT=${PDK_ROOT:-} PDK=${PDK:-} netlist_dir=${XSCHEM_NETLIST_DIR:-}"
+log_timing "before xschem exec"
 
 case "$(basename "$INPUT")" in
   *.schematic.room|*.symbol.room|*.schematic.core|*.symbol.core)

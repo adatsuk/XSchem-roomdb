@@ -216,7 +216,7 @@ proc room_pick_cell {cells {title "Select cell"}} {
   pack $top.btns
   bind $top.lb <Double-Button-1> "$top.btns.ok invoke"
   tkwait window $top
-  return $::room_pick_cell_answer
+  return $::room_pick_cell_answe
 }
 
 proc room_temp_sch_path {cell ext} {
@@ -293,6 +293,39 @@ proc room_apply_cell_names {roompath {cell ""}} {
   catch {xschem set netlist_name ${cell}.spice}
 }
 
+# Copy a /mnt/* ROOM file onto native ext4 so Cap'n Proto / Tcl I/O is not stuck on 9p.
+# Returns the path to read from (staged or original). Binding/save still use the original.
+proc room_stage_room_for_read {roompath} {
+  set roompath [room_norm_path $roompath]
+  if {$roompath eq "" || ![file exists $roompath]} {
+    return $roompath
+  }
+  if {![string match /mnt/* $roompath]} {
+    return $roompath
+  }
+  set cache [file join $::env(HOME) .cache libman-xschem staged]
+  catch {file mkdir $cache}
+  set dest [file join $cache [file tail $roompath]]
+  set need 1
+  if {[file exists $dest]} {
+    set src_mtime 0
+    set dst_mtime 0
+    catch {set src_mtime [file mtime $roompath]}
+    catch {set dst_mtime [file mtime $dest]}
+    if {$dst_mtime >= $src_mtime && [file size $dest] == [file size $roompath]} {
+      set need 0
+    }
+  }
+  if {$need} {
+    if {[catch {file copy -force $roompath $dest} err]} {
+      room_log_launch "stage ROOM failed ($err); reading via 9p: $roompath"
+      return $roompath
+    }
+    room_log_launch "staged ROOM for fast read: $roompath -> $dest"
+  }
+  return $dest
+}
+
 # Add sibling design dirs (e.g. ../inverter/inverter.sym) for hierarchical blocks.
 proc room_add_hierarchy_search_paths {roompath} {
   global pathlist
@@ -302,7 +335,8 @@ proc room_add_hierarchy_search_paths {roompath} {
   set dir [file normalize [file dirname [room_norm_path $roompath]]]
   set parent [file dirname $dir]
   set extra [list $dir $parent]
-  if {[file isdirectory $parent]} {
+  # Globbing every sibling under /mnt/c (Academy, LibMan tests, …) stalls on p9_client_rpc.
+  if {![string match /mnt/* $parent] && [file isdirectory $parent]} {
     foreach sub [glob -nocomplain -directory $parent *] {
       if {[file isdirectory $sub]} {
         lappend extra [file normalize $sub]
@@ -331,7 +365,7 @@ proc room_load_room_data {data roompath cell} {
     lappend load_args -nosymbols
   }
   if {[catch {eval xschem load_data $load_args} err]} {
-    error $err
+    error $er
   }
   set schname [xschem get schname]
   if {[string match *untitled* $schname]} {
@@ -613,12 +647,12 @@ proc room_batch_netlist {outdir sch} {
     error "schematic not found: $sch"
   }
   room_refresh_sch_on_disk $sch
-  room_stage_hierarchy_syms $sch $outdir
+  room_stage_hierarchy_syms $sch $outdi
   set xschem_bin xschem
   if {[info exists ::env(XSCHEM_BIN)] && $::env(XSCHEM_BIN) ne ""} {
     set xschem_bin $::env(XSCHEM_BIN)
   }
-  file mkdir $outdir
+  file mkdir $outdi
   set base [file rootname [file tail $sch]]
   set nf [file join $outdir ${base}.spice]
   set rc [room_batch_netlist_rc]
@@ -628,7 +662,7 @@ proc room_batch_netlist {outdir sch} {
   }
   lappend cmd $sch
   set err ""
-  catch {exec {*}$cmd} err
+  catch {exec {*}$cmd} er
   if {![file exists $nf]} {
     error "batch netlist failed: $err"
   }
@@ -681,7 +715,7 @@ proc room_ensure_netlist {d {sch ""} {batch_err_var ""}} {
   }
   if {$sch ne "" && [file exists $sch]} {
     if {[catch {set nf [room_batch_netlist $d $sch]} err]} {
-      set batch_err_msg $err
+      set batch_err_msg $er
       puts "batch netlist: $err"
     }
   }
@@ -747,8 +781,8 @@ proc room_install_simulate_hook {} {
   # WSL/LibMan: avoid xschem execute_fileevent (ps + Tk screen geometry breaks on WSLg).
   if {[info exists ::env(XSCHEM_NETLIST_DIR)] && $::env(XSCHEM_NETLIST_DIR) ne ""} {
     proc simulate {{callback {}}} {
-      global netlist_dir
-      set d $netlist_dir
+      global netlist_di
+      set d $netlist_di
       if {$d eq ""} {
         catch {set d [xschem get netlist_dir]}
       }
@@ -787,8 +821,8 @@ proc room_install_simulate_hook {} {
     return
   }
   proc simulate {{callback {}}} {
-    global netlist_dir
-    set d $netlist_dir
+    global netlist_di
+    set d $netlist_di
     if {$d eq ""} {
       catch {set d [xschem get netlist_dir]}
     }
@@ -810,9 +844,12 @@ proc room_open {roompath {cell ""}} {
     tk_messageBox -icon error -message "Not an Xschem ROOM file.\nExpected .schematic.room or .symbol.room:\n$roompath"
     return
   }
+  set roompath [file normalize $roompath]
+  # Stage off /mnt/c before any Cap'n Proto / cell-list I/O (avoids p9_client_rpc hangs).
+  set readpath [room_stage_room_for_read $roompath]
   if {$cell eq ""} {
     set guess [room_guess_cell_name $roompath]
-    set cells [room_list_cells $roompath]
+    set cells [room_list_cells $readpath]
     if {[llength $cells] == 0} {
       tk_messageBox -icon error -message "No cells in:\n$roompath"
       return
@@ -828,13 +865,13 @@ proc room_open {roompath {cell ""}} {
       }
     }
   }
-  set roompath [file normalize $roompath]
   set ::room_active_roompath $roompath
   set ::room_active_cell $cell
   room_add_hierarchy_search_paths $roompath
-  room_preload_primitives
+  # Defer primitive index build so the window appears before walking /mnt/c libs.
+  after idle room_preload_primitives
   if {[room_has_native_bridge]} {
-    if {[catch {set data [coreapi_export_cell_data $roompath $cell]} err]} {
+    if {[catch {set data [coreapi_export_cell_data $readpath $cell]} err]} {
       tk_messageBox -icon error -message "Failed to open ROOM:\n$err"
       return
     }
@@ -856,7 +893,7 @@ proc room_open {roompath {cell ""}} {
   } else {
     set sch [room_temp_sch_path $cell $ext]
   }
-  if {[catch {room_export_cell_to_sch $roompath $cell $sch} err]} {
+  if {[catch {room_export_cell_to_sch $readpath $cell $sch} err]} {
     tk_messageBox -icon error -message "Failed to open ROOM:\n$err"
     return
   }
@@ -924,14 +961,14 @@ proc room_write {sch roompath} {
   }
   if {[room_has_native_bridge] && [info commands coreapi_import_data] ne ""} {
     if {[catch {set data [xschem get_data]} err]} {
-      error $err
+      error $er
     }
     if {[catch {coreapi_import_data $data $roompath -lib xschem} err]} {
-      error $err
+      error $er
     }
     catch {xschem set_modify 0}
   } elseif {[catch {coreapi_import $sch $roompath -lib xschem} err]} {
-    error $err
+    error $er
   }
   room_set_binding $sch $roompath
 }
@@ -1139,7 +1176,7 @@ proc room_add_menu {} {
     $topwin.menubar.room add command -label "Open..." -command room_file_open
     $topwin.menubar.room add command -label "Save" -command room_file_save
     $topwin.menubar.room add command -label "Save as..." -command room_file_saveas
-    $topwin.menubar.room add separator
+    $topwin.menubar.room add separato
     $topwin.menubar.room add command -label "Open $liblabel" -command room_open_default
     $topwin.menubar.room add command -label "Save to $liblabel" -command room_save_current
     $topwin.menubar.room add command -label "Sync payload folder" -command room_sync_payload
@@ -1229,7 +1266,7 @@ proc room_lib_prefix_from_roompath {roompath} {
   if {$lib_dir eq "" || $lib_dir eq "."} {
     return ""
   }
-  return $lib_dir
+  return $lib_di
 }
 
 proc room_register_symbol_key {key roompath} {
@@ -1467,7 +1504,7 @@ proc room_materialize_symbol {symref} {
       }
     }
   }
-  file mkdir $outdir
+  file mkdir $outdi
   set sym [file join $outdir "$cell.sym"]
   if {[catch {coreapi_export_cell $roompath $cell $sym} err]} {
     puts stderr "Failed to materialize ROOM symbol $symref from $roompath: $err"
@@ -1677,7 +1714,7 @@ proc room_install_wsl_execute_hook {} {
     set execute(win_path,last) $execute(win_path,$id)
     set execute(data,last) $execute(data,$id)
     if {![info exists err]} { set err {} }
-    set execute(error,last) $err
+    set execute(error,last) $er
     set execute(status,last) $execute(status,$id)
     if {[info exists execute(callback,$id)] && $execute(callback,$id) ne {}} {
       catch {eval uplevel #0 [list $execute(callback,$id)]}
@@ -1701,12 +1738,12 @@ proc room_install_wsl_execute_hook {} {
   }
   rename edit_netlist edit_netlist_orig
   proc edit_netlist {netlist} {
-    global netlist_dir
-    regsub {/$} $netlist_dir {} netlist_dir
+    global netlist_di
+    regsub {/$} $netlist_dir {} netlist_di
     if {[set_netlist_dir 0] eq ""} {
       return {}
     }
-    set d $netlist_dir
+    set d $netlist_di
     set batch_err ""
     set nf [room_ensure_netlist $d "" batch_err]
     if {![file exists $nf]} {
