@@ -558,6 +558,56 @@ proc room_netlist_looks_valid {nf} {
   return 1
 }
 
+# Prefixed .include of lookalike S2Spice bodies (em.lookalike → sibling *.emmodel.room Touchstone).
+# Mirrors Qucs LibComp createSubNetlist for layout-lookalike cells.
+proc room_inject_lookalike_spice_includes {nf} {
+  if {$nf eq "" || ![file exists $nf]} {
+    return
+  }
+  set includes {}
+  if {[info exists ::room_lookalike_spice]} {
+    foreach {cell spice} [array get ::room_lookalike_spice] {
+      if {[file exists $spice]} {
+        lappend includes $spice
+      }
+    }
+  }
+  # Also pick up *.spice next to materialized symbols (export-time side effect).
+  if {[info exists ::room_symbol_materialized]} {
+    foreach {symref sympath} [array get ::room_symbol_materialized] {
+      set spice [file rootname $sympath].spice
+      if {[file exists $spice]} {
+        lappend includes $spice
+      }
+    }
+  }
+  set includes [lsort -unique $includes]
+  if {[llength $includes] == 0} {
+    return
+  }
+  if {[catch {set fh [open $nf r]}]} {
+    return
+  }
+  set body [read $fh]
+  close $fh
+  set prefix ""
+  foreach spice $includes {
+    set line ".include [file normalize $spice]"
+    if {[string first $line $body] < 0 && [string first [file tail $spice] $body] < 0} {
+      append prefix "$line\n"
+    }
+  }
+  if {$prefix eq ""} {
+    return
+  }
+  if {[catch {set fh [open $nf w]}]} {
+    return
+  }
+  puts -nonewline $fh $prefix
+  puts -nonewline $fh $body
+  close $fh
+}
+
 proc room_batch_netlist {outdir sch} {
   if {![file exists $sch]} {
     error "schematic not found: $sch"
@@ -585,6 +635,7 @@ proc room_batch_netlist {outdir sch} {
   if {![room_netlist_looks_valid $nf]} {
     error "netlist still has unresolved symbols: $nf\n$err"
   }
+  room_inject_lookalike_spice_includes $nf
   return $nf
 }
 
@@ -642,6 +693,9 @@ proc room_ensure_netlist {d {sch ""} {batch_err_var ""}} {
     if {$sch ne ""} {
       set nf [file join $d [file rootname [file tail $sch]].spice]
     }
+  }
+  if {$nf ne "" && [file exists $nf]} {
+    room_inject_lookalike_spice_includes $nf
   }
   if {$batch_err_var ne ""} {
     upvar 1 $batch_err_var batch_err_out
@@ -1284,6 +1338,8 @@ proc room_build_symbol_index {} {
   array set ::room_symbol_index {}
   array unset ::room_symbol_materialized
   array set ::room_symbol_materialized {}
+  array unset ::room_lookalike_spice
+  array set ::room_lookalike_spice {}
 
   set cores [room_primitive_lib_paths]
   if {[llength $cores] == 0} {
@@ -1416,6 +1472,11 @@ proc room_materialize_symbol {symref} {
   if {[catch {coreapi_export_cell $roompath $cell $sym} err]} {
     puts stderr "Failed to materialize ROOM symbol $symref from $roompath: $err"
     return ""
+  }
+  # Lookalike symbols: coreapi_export_cell also writes sibling cell.spice (S2Spice from emmodel).
+  set spice [file rootname $sym].spice
+  if {[file exists $spice]} {
+    set ::room_lookalike_spice($cell) $spice
   }
   set ::room_symbol_materialized($symref) $sym
   room_refresh_pathlist
