@@ -216,7 +216,7 @@ proc room_pick_cell {cells {title "Select cell"}} {
   pack $top.btns
   bind $top.lb <Double-Button-1> "$top.btns.ok invoke"
   tkwait window $top
-  return $::room_pick_cell_answe
+  return $::room_pick_cell_answer
 }
 
 proc room_temp_sch_path {cell ext} {
