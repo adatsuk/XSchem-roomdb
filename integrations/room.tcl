@@ -357,6 +357,10 @@ proc room_preload_primitives {} {
   room_refresh_pathlist
 }
 
+proc room_symbol_index_signature {} {
+  return [join [room_primitive_lib_paths] "|"]
+}
+
 proc room_load_room_data {data roompath cell} {
   set logical [room_logical_schname $roompath $cell]
   catch {file mkdir [file dirname $logical]}
@@ -1086,12 +1090,15 @@ proc room_resolve_roompath {{sch ""}} {
 }
 
 proc room_log_launch {msg} {
-  if {![info exists ::env(XSCHEM_LAUNCH_LOG)] || $::env(XSCHEM_LAUNCH_LOG) eq ""} {
-    return
+  set log ""
+  if {[info exists ::env(XSCHEM_LAUNCH_LOG)] && $::env(XSCHEM_LAUNCH_LOG) ne ""} {
+    set log $::env(XSCHEM_LAUNCH_LOG)
+  } else {
+    set log "/tmp/xschem-libman-launch.log"
   }
   catch {
-    set lf [open $::env(XSCHEM_LAUNCH_LOG) a]
-    puts $lf "[clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S%z}] $msg"
+    set lf [open $log a]
+    puts $lf "[clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S%z}] room: $msg"
     close $lf
   }
 }
@@ -1370,16 +1377,30 @@ proc room_primitive_lib_paths {} {
   return {}
 }
 
-proc room_build_symbol_index {} {
+proc room_build_symbol_index {{force 0}} {
+  set cores [room_primitive_lib_paths]
+  set sig [join $cores "|"]
+  # Rebuilding clears nothing useful for pathlist, but wiping materialized forces
+  # Cap'n Proto re-export from /mnt/c (multi-minute stalls). Skip when unchanged.
+  if {!$force && [info exists ::room_symbol_index_sig] && $::room_symbol_index_sig eq $sig \
+      && [array size ::room_symbol_index] > 0} {
+    return
+  }
+
+  set t0 [clock milliseconds]
   array unset ::room_symbol_index
   array set ::room_symbol_index {}
-  array unset ::room_symbol_materialized
-  array set ::room_symbol_materialized {}
-  array unset ::room_lookalike_spice
-  array set ::room_lookalike_spice {}
+  if {$force || ![info exists ::room_symbol_materialized]} {
+    array unset ::room_symbol_materialized
+    array set ::room_symbol_materialized {}
+  }
+  if {$force || ![info exists ::room_lookalike_spice]} {
+    array unset ::room_lookalike_spice
+    array set ::room_lookalike_spice {}
+  }
 
-  set cores [room_primitive_lib_paths]
   if {[llength $cores] == 0} {
+    set ::room_symbol_index_sig $sig
     return
   }
 
@@ -1468,7 +1489,11 @@ proc room_build_symbol_index {} {
           }
         }
       }
-    }  }
+    }
+  }
+  set ::room_symbol_index_sig $sig
+  set dt [expr {[clock milliseconds] - $t0}]
+  room_log_launch "symbol index: [llength $cores] cores, [array size ::room_symbol_index] keys, ${dt}ms"
 }
 
 proc room_materialize_symbol {symref} {
@@ -1509,6 +1534,7 @@ proc room_materialize_symbol {symref} {
   set sym [file join $outdir "$cell.sym"]
   if {[catch {coreapi_export_cell $roompath $cell $sym} err]} {
     puts stderr "Failed to materialize ROOM symbol $symref from $roompath: $err"
+    room_log_launch "materialize FAILED $symref: $err"
     return ""
   }
   # Lookalike symbols: coreapi_export_cell also writes sibling cell.spice (S2Spice from emmodel).
@@ -1516,14 +1542,46 @@ proc room_materialize_symbol {symref} {
   if {[file exists $spice]} {
     set ::room_lookalike_spice($cell) $spice
   }
+  # type=subcircuit still makes xschem probe for sibling .sch (descend / hierarchy).
+  # spice_stop lookalikes have no schematic — write a stub so the Alert goes away.
+  set sch [file rootname $sym].sch
+  if {![file exists $sch]} {
+    set looks 0
+    if {[catch {set sfh [open $sym r]}]} {
+      set looks 0
+    } else {
+      set sbody [read $sfh]
+      close $sfh
+      if {[string match "*spice_stop=true*" $sbody] || [string match "*em.lookalike=1*" $sbody]} {
+        set looks 1
+      }
+    }
+    if {$looks || [file exists $spice]} {
+      if {![catch {set ofh [open $sch w]}]} {
+        puts $ofh "v {xschem version=3.4.4 file_version=1.2}"
+        puts $ofh "G {}"
+        puts $ofh "K {em.lookalike_stub=1}"
+        puts $ofh "V {}"
+        puts $ofh "S {}"
+        puts $ofh "E {}"
+        close $ofh
+      }
+    }
+  }
   set ::room_symbol_materialized($symref) $sym
   room_refresh_pathlist
+  room_log_launch "materialized $symref -> $sym"
   return $sym
 }
 
 proc room_schedule_primitive_reload {} {
-  foreach delay {50 400 1200} {
-    after $delay room_finish_primitive_setup
+  # Do not rebuild the full index repeatedly (was 3x file-exists walks on /mnt/c).
+  foreach delay {200 900} {
+    after $delay {
+      room_refresh_pathlist
+      catch {xschem reload_symbols}
+      catch {xschem redraw}
+    }
   }
 }
 
@@ -1791,5 +1849,6 @@ after idle {
   after 1500 room_ensure_window_geometry
   after 800 room_install_file_hooks
   after 2000 room_install_file_hooks
+  # Light refresh only — room_build_symbol_index already ran above.
   room_schedule_primitive_reload
 }

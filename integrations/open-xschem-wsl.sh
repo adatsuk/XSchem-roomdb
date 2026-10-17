@@ -125,6 +125,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 XSCHEM_ROOT="${XSCHEM_ROOT:-${XSCHEM_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}}"
 XSCHEM_RC="${XSCHEM_RC:-$XSCHEM_ROOT/xschemrc}"
 
+LAUNCH_LOG="${XSCHEM_LAUNCH_LOG:-${TMPDIR:-/tmp}/xschem-libman-launch.log}"
+export XSCHEM_LAUNCH_LOG="$LAUNCH_LOG"
+log_launch() {
+  printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date)" "$*" >>"$LAUNCH_LOG"
+}
+
 # Mirror xschemrc + integrations onto native WSL ext4. Sourcing Tcl and loading
 # roomtcl.so from /mnt/c (9p) is a large part of the 20–40s LibMan open time.
 sync_xschem_native_tree() {
@@ -212,6 +218,50 @@ split_primitive_libs() {
   printf '%s\n' "${arr[@]}"
 }
 
+# Copy .symbol.room (+ sibling .emmodel.room) onto ext4 so Tcl index / Cap'n Proto
+# loads do not walk 100+ files over 9p on every open.
+stage_primitive_room_list() {
+  local -a srcs=("$@")
+  local cache="${XSCHEM_ROOM_SOURCE_CACHE:-$HOME/.cache/libman-xschem/room_sources}"
+  mkdir -p "$cache"
+  local -a staged=()
+  local src dst rel em
+  local copied=0 skipped=0
+  for src in "${srcs[@]}"; do
+    [[ -f "$src" ]] || continue
+    rel="${src#/mnt/}"
+    if [[ "$rel" == "$src" ]]; then
+      rel="local/$(basename "$(dirname "$src")")/$(basename "$src")"
+    fi
+    dst="$cache/$rel"
+    mkdir -p "$(dirname "$dst")"
+    if [[ -f "$dst" ]] && [[ ! "$src" -nt "$dst" ]] \
+        && [[ "$(stat -c '%s' "$src" 2>/dev/null || echo 0)" == "$(stat -c '%s' "$dst" 2>/dev/null || echo 1)" ]]; then
+      skipped=$((skipped + 1))
+    else
+      if cp -f "$src" "$dst" 2>/dev/null; then
+        copied=$((copied + 1))
+        em="${src%.symbol.room}.emmodel.room"
+        if [[ -f "$em" ]]; then
+          cp -f "$em" "${dst%.symbol.room}.emmodel.room" 2>/dev/null || true
+        fi
+        em="${src%.symbol.core}.emmodel.core"
+        if [[ -f "$em" ]]; then
+          cp -f "$em" "${dst%.symbol.core}.emmodel.core" 2>/dev/null || true
+        fi
+      else
+        staged+=("$src")
+        continue
+      fi
+    fi
+    staged+=("$dst")
+  done
+  if [[ ${#staged[@]} -gt 0 ]]; then
+    log_launch "staged primitive ROOMs: ${#staged[@]} (copied=$copied skipped=$skipped) -> $cache"
+    printf '%s\n' "${staged[@]}"
+  fi
+}
+
 if [[ -n "${ROOM_PRIMITIVE_LIBS_FILE:-}" ]]; then
   _list_file="$(wsl_path_if_windows "$ROOM_PRIMITIVE_LIBS_FILE")"
   if [[ -f "$_list_file" ]]; then
@@ -222,6 +272,11 @@ if [[ -n "${ROOM_PRIMITIVE_LIBS_FILE:-}" ]]; then
       _converted+=("$_p")
     done < "$_list_file"
     if [[ ${#_converted[@]} -gt 0 ]]; then
+      # log_launch not defined yet on --warm early path; define a no-op fallback.
+      if ! declare -F log_launch >/dev/null 2>&1; then
+        log_launch() { :; }
+      fi
+      mapfile -t _converted < <(stage_primitive_room_list "${_converted[@]}")
       ROOM_PRIMITIVE_LIBS="$(IFS=':'; echo "${_converted[*]}")"
       export ROOM_PRIMITIVE_LIBS
       export ROOM_PRIMITIVE_LIB="${_converted[0]}"
@@ -237,6 +292,12 @@ if [[ -n "${ROOM_PRIMITIVE_LIBS:-}" ]]; then
     [[ -z "$_p" ]] && continue
     _converted+=("$_p")
   done < <(split_primitive_libs "$ROOM_PRIMITIVE_LIBS")
+  if ! declare -F log_launch >/dev/null 2>&1; then
+    log_launch() { :; }
+  fi
+  if [[ ${#_converted[@]} -gt 0 ]]; then
+    mapfile -t _converted < <(stage_primitive_room_list "${_converted[@]}")
+  fi
   ROOM_PRIMITIVE_LIBS="$(IFS=':'; echo "${_converted[*]}")"
   export ROOM_PRIMITIVE_LIBS
   if [[ ${#_converted[@]} -gt 0 ]]; then
