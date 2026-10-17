@@ -1407,9 +1407,10 @@ proc room_build_symbol_index {} {
     }
     # Simulation controllers / sources are analogLib; keep analogLib/ keys even if a
     # legacy ROOM still lives under commonLib (resolver remaps commonLib -> analogLib).
-    foreach simcell {launcher INCLSCR TR Vdc Vac Vpulse Vexp Vrect Idc Iac Ipulse GND vdd vss} {
+    foreach simcell {launcher INCLSCR TR Vdc Vac Vpulse Vexp Vrect Idc Iac Ipulse GND vdd vss Pac} {
       if {$cell eq $simcell} {
         room_register_symbol_key "analogLib/$cell.sym" $roompath
+        room_register_symbol_key "$cell.sym" $roompath
         break
       }
     }
