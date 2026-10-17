@@ -365,7 +365,7 @@ proc room_load_room_data {data roompath cell} {
     lappend load_args -nosymbols
   }
   if {[catch {eval xschem load_data $load_args} err]} {
-    error $er
+    error $e
   }
   set schname [xschem get schname]
   if {[string match *untitled* $schname]} {
@@ -662,7 +662,7 @@ proc room_batch_netlist {outdir sch} {
   }
   lappend cmd $sch
   set err ""
-  catch {exec {*}$cmd} er
+  catch {exec {*}$cmd} e
   if {![file exists $nf]} {
     error "batch netlist failed: $err"
   }
@@ -715,7 +715,7 @@ proc room_ensure_netlist {d {sch ""} {batch_err_var ""}} {
   }
   if {$sch ne "" && [file exists $sch]} {
     if {[catch {set nf [room_batch_netlist $d $sch]} err]} {
-      set batch_err_msg $er
+      set batch_err_msg $e
       puts "batch netlist: $err"
     }
   }
@@ -961,14 +961,14 @@ proc room_write {sch roompath} {
   }
   if {[room_has_native_bridge] && [info commands coreapi_import_data] ne ""} {
     if {[catch {set data [xschem get_data]} err]} {
-      error $er
+      error $e
     }
     if {[catch {coreapi_import_data $data $roompath -lib xschem} err]} {
-      error $er
+      error $e
     }
     catch {xschem set_modify 0}
   } elseif {[catch {coreapi_import $sch $roompath -lib xschem} err]} {
-    error $er
+    error $e
   }
   room_set_binding $sch $roompath
 }
@@ -1715,7 +1715,7 @@ proc room_install_wsl_execute_hook {} {
     set execute(win_path,last) $execute(win_path,$id)
     set execute(data,last) $execute(data,$id)
     if {![info exists err]} { set err {} }
-    set execute(error,last) $er
+    set execute(error,last) $e
     set execute(status,last) $execute(status,$id)
     if {[info exists execute(callback,$id)] && $execute(callback,$id) ne {}} {
       catch {eval uplevel #0 [list $execute(callback,$id)]}
