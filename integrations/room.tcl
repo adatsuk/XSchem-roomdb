@@ -365,7 +365,7 @@ proc room_load_room_data {data roompath cell} {
     lappend load_args -nosymbols
   }
   if {[catch {eval xschem load_data $load_args} err]} {
-    error $e
+    error $err
   }
   set schname [xschem get schname]
   if {[string match *untitled* $schname]} {
@@ -647,12 +647,12 @@ proc room_batch_netlist {outdir sch} {
     error "schematic not found: $sch"
   }
   room_refresh_sch_on_disk $sch
-  room_stage_hierarchy_syms $sch $outdi
+  room_stage_hierarchy_syms $sch $outdir
   set xschem_bin xschem
   if {[info exists ::env(XSCHEM_BIN)] && $::env(XSCHEM_BIN) ne ""} {
     set xschem_bin $::env(XSCHEM_BIN)
   }
-  file mkdir $outdi
+  file mkdir $outdir
   set base [file rootname [file tail $sch]]
   set nf [file join $outdir ${base}.spice]
   set rc [room_batch_netlist_rc]
@@ -662,7 +662,7 @@ proc room_batch_netlist {outdir sch} {
   }
   lappend cmd $sch
   set err ""
-  catch {exec {*}$cmd} e
+  catch {exec {*}$cmd} err
   if {![file exists $nf]} {
     error "batch netlist failed: $err"
   }
@@ -715,7 +715,7 @@ proc room_ensure_netlist {d {sch ""} {batch_err_var ""}} {
   }
   if {$sch ne "" && [file exists $sch]} {
     if {[catch {set nf [room_batch_netlist $d $sch]} err]} {
-      set batch_err_msg $e
+      set batch_err_msg $err
       puts "batch netlist: $err"
     }
   }
@@ -961,14 +961,14 @@ proc room_write {sch roompath} {
   }
   if {[room_has_native_bridge] && [info commands coreapi_import_data] ne ""} {
     if {[catch {set data [xschem get_data]} err]} {
-      error $e
+      error $err
     }
     if {[catch {coreapi_import_data $data $roompath -lib xschem} err]} {
-      error $e
+      error $err
     }
     catch {xschem set_modify 0}
   } elseif {[catch {coreapi_import $sch $roompath -lib xschem} err]} {
-    error $e
+    error $err
   }
   room_set_binding $sch $roompath
 }
@@ -1266,7 +1266,7 @@ proc room_lib_prefix_from_roompath {roompath} {
   if {$lib_dir eq "" || $lib_dir eq "."} {
     return ""
   }
-  return $lib_di
+  return $lib_dir
 }
 
 proc room_register_symbol_key {key roompath} {
@@ -1505,7 +1505,7 @@ proc room_materialize_symbol {symref} {
       }
     }
   }
-  file mkdir $outdi
+  file mkdir $outdir
   set sym [file join $outdir "$cell.sym"]
   if {[catch {coreapi_export_cell $roompath $cell $sym} err]} {
     puts stderr "Failed to materialize ROOM symbol $symref from $roompath: $err"
@@ -1715,7 +1715,7 @@ proc room_install_wsl_execute_hook {} {
     set execute(win_path,last) $execute(win_path,$id)
     set execute(data,last) $execute(data,$id)
     if {![info exists err]} { set err {} }
-    set execute(error,last) $e
+    set execute(error,last) $err
     set execute(status,last) $execute(status,$id)
     if {[info exists execute(callback,$id)] && $execute(callback,$id) ne {}} {
       catch {eval uplevel #0 [list $execute(callback,$id)]}
