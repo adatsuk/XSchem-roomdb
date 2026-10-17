@@ -75,17 +75,24 @@ sync_ihp_pdk_native_cache() {
   mkdir -p "$cache/ihp-sg13g2/libs.tech/ngspice/models" \
            "$cache/ihp-sg13g2/libs.tech/ngspice/osdi" \
            "$cache/ihp-sg13g2/libs.tech/xschem"
-  # Models/OSDI are small (~6MB). Full PDK xschem/ from /mnt/c can take minutes on 9p —
-  # only sync when the cache is empty (or FORCE_PDK_SYNC=1).
+  # Models/OSDI are small (~6MB) but rsync from /mnt/c still costs ~1–2s every launch.
+  # Only sync when the cache is empty (or FORCE_PDK_SYNC=1). Same for PDK xschem/.
+  local force="${FORCE_PDK_SYNC:-0}"
   if [[ -n "$models_src" ]]; then
-    rsync -a --size-only "$models_src/" "$cache/ihp-sg13g2/libs.tech/ngspice/models/"
+    local models_dst="$cache/ihp-sg13g2/libs.tech/ngspice/models"
+    if [[ "$force" == "1" || -z "$(ls -A "$models_dst" 2>/dev/null || true)" ]]; then
+      rsync -a --size-only "$models_src/" "$models_dst/"
+    fi
   fi
   if [[ -n "$osdi_src" ]]; then
-    rsync -a --size-only "$osdi_src/" "$cache/ihp-sg13g2/libs.tech/ngspice/osdi/"
+    local osdi_dst="$cache/ihp-sg13g2/libs.tech/ngspice/osdi"
+    if [[ "$force" == "1" || -z "$(ls -A "$osdi_dst" 2>/dev/null || true)" ]]; then
+      rsync -a --size-only "$osdi_src/" "$osdi_dst/"
+    fi
   fi
   if [[ -n "$xschem_src" ]]; then
     local xschem_dst="$cache/ihp-sg13g2/libs.tech/xschem"
-    if [[ "${FORCE_PDK_SYNC:-0}" == "1" || -z "$(ls -A "$xschem_dst" 2>/dev/null || true)" ]]; then
+    if [[ "$force" == "1" || -z "$(ls -A "$xschem_dst" 2>/dev/null || true)" ]]; then
       rsync -a --size-only "$xschem_src/" "$xschem_dst/"
     fi
   fi
@@ -131,18 +138,25 @@ sync_xschem_native_tree() {
 
   # Prefer cheap updates of the hot path (room.tcl / roomtcl.so / xschemrc).
   # Full integrations/ rsync across 9p was a common multi-minute stall.
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --size-only "$XSCHEM_ROOT/xschemrc" "$cache/xschemrc"
-    rsync -a --size-only \
-      --include 'room.tcl' --include 'room_lock.tcl' --include 'roomtcl.so' --include 'coretcl.so' \
-      --exclude '*' \
-      "$XSCHEM_ROOT/integrations/" "$cache/integrations/"
-  else
-    cp -u "$XSCHEM_ROOT/xschemrc" "$cache/xschemrc"
-    cp -u "$XSCHEM_ROOT/integrations/"room.tcl "$cache/integrations/" 2>/dev/null || true
-    cp -u "$XSCHEM_ROOT/integrations/"room_lock.tcl "$cache/integrations/" 2>/dev/null || true
-    cp -u "$XSCHEM_ROOT/integrations/"*.so "$cache/integrations/" 2>/dev/null || true
-  fi
+  # Skip copy when the cached file is already same size and not older than source.
+  sync_file_if_newer() {
+    local src="$1" dst="$2"
+    [[ -f "$src" ]] || return 0
+    if [[ -f "$dst" ]]; then
+      local ss sd
+      ss="$(stat -c '%s' "$src" 2>/dev/null || echo 0)"
+      sd="$(stat -c '%s' "$dst" 2>/dev/null || echo 1)"
+      if [[ "$ss" == "$sd" && ! "$src" -nt "$dst" ]]; then
+        return 0
+      fi
+    fi
+    cp -f "$src" "$dst"
+  }
+  sync_file_if_newer "$XSCHEM_ROOT/xschemrc" "$cache/xschemrc"
+  sync_file_if_newer "$XSCHEM_ROOT/integrations/room.tcl" "$cache/integrations/room.tcl"
+  sync_file_if_newer "$XSCHEM_ROOT/integrations/room_lock.tcl" "$cache/integrations/room_lock.tcl"
+  sync_file_if_newer "$XSCHEM_ROOT/integrations/roomtcl.so" "$cache/integrations/roomtcl.so"
+  sync_file_if_newer "$XSCHEM_ROOT/integrations/coretcl.so" "$cache/integrations/coretcl.so"
 
   if [[ -f "$cache/xschemrc" && -f "$cache/integrations/room.tcl" ]]; then
     XSCHEM_ROOT="$cache"
@@ -420,6 +434,52 @@ case "$(basename "$INPUT")" in
     exit 2
     ;;
 esac
+
+# LibMan always starts a fresh process. A previous LibMan xschem left running still
+# holds the ROOM .lck → next open is read-only. Take over same-view sessions.
+release_previous_libman_room_lock() {
+  local room="$1"
+  case "$(basename "$room")" in
+    *.schematic.room|*.symbol.room|*.schematic.core|*.symbol.core) ;;
+    *) return 0 ;;
+  esac
+  local lck="${room}.lck"
+  [[ -f "$lck" ]] || return 0
+
+  local pid=""
+  pid="$(grep -oE '"pid"[[:space:]]*:[[:space:]]*[0-9]+' "$lck" 2>/dev/null | head -1 | grep -oE '[0-9]+$' || true)"
+  if [[ -z "$pid" ]]; then
+    rm -f "$lck"
+    log_launch "removed unreadable ROOM lock: $lck"
+    return 0
+  fi
+
+  if ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$lck"
+    log_launch "removed stale ROOM lock (dead pid $pid)"
+    return 0
+  fi
+
+  local cmd=""
+  if [[ -r "/proc/$pid/cmdline" ]]; then
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  fi
+  if [[ "$cmd" == *xschem* && ( "$cmd" == *libman-xschem* || "$cmd" == *XSchem-roomdb* || "$cmd" == *xschemrc* ) ]]; then
+    log_launch "replacing previous LibMan xschem pid=$pid for $room"
+    kill "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.2
+    done
+    kill -9 "$pid" 2>/dev/null || true
+    rm -f "$lck"
+    return 0
+  fi
+
+  log_launch "ROOM locked by live pid=$pid ($cmd); new session will be read-only"
+}
+
+release_previous_libman_room_lock "$INPUT"
 
 # Must exec (foreground): if we background and exit, WSL tears down the session and
 # kills xschem before the window appears. open-xschem-wsl.bat uses "start /b wsl"

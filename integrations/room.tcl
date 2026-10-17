@@ -781,8 +781,8 @@ proc room_install_simulate_hook {} {
   # WSL/LibMan: avoid xschem execute_fileevent (ps + Tk screen geometry breaks on WSLg).
   if {[info exists ::env(XSCHEM_NETLIST_DIR)] && $::env(XSCHEM_NETLIST_DIR) ne ""} {
     proc simulate {{callback {}}} {
-      global netlist_di
-      set d $netlist_di
+      global netlist_dir
+      set d $netlist_dir
       if {$d eq ""} {
         catch {set d [xschem get netlist_dir]}
       }
@@ -821,8 +821,8 @@ proc room_install_simulate_hook {} {
     return
   }
   proc simulate {{callback {}}} {
-    global netlist_di
-    set d $netlist_di
+    global netlist_dir
+    set d $netlist_dir
     if {$d eq ""} {
       catch {set d [xschem get netlist_dir]}
     }
@@ -1739,12 +1739,12 @@ proc room_install_wsl_execute_hook {} {
   }
   rename edit_netlist edit_netlist_orig
   proc edit_netlist {netlist} {
-    global netlist_di
-    regsub {/$} $netlist_dir {} netlist_di
+    global netlist_dir
+    regsub {/$} $netlist_dir {} netlist_dir
     if {[set_netlist_dir 0] eq ""} {
       return {}
     }
-    set d $netlist_di
+    set d $netlist_dir
     set batch_err ""
     set nf [room_ensure_netlist $d "" batch_err]
     if {![file exists $nf]} {
