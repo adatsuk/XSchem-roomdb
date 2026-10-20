@@ -102,4 +102,15 @@ proc libman_configure_ngspice {} {
 }
 after idle libman_configure_ngspice
 
+# Open-latency breadcrumb (room.tcl overwrites room_log_launch with the real logger).
+catch {
+  set _lf [open [expr {[info exists ::env(XSCHEM_LAUNCH_LOG)] ? $::env(XSCHEM_LAUNCH_LOG) : "/tmp/xschem-libman-launch.log"}] a]
+  puts $_lf "[clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S%z}] xschemrc: sourcing room.tcl from $::XSCHEM_ROOT"
+  close $_lf
+}
 source [file join $::XSCHEM_ROOT integrations room.tcl]
+catch {
+  set _lf [open [expr {[info exists ::env(XSCHEM_LAUNCH_LOG)] ? $::env(XSCHEM_LAUNCH_LOG) : "/tmp/xschem-libman-launch.log"}] a]
+  puts $_lf "[clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S%z}] xschemrc: room.tcl sourced"
+  close $_lf
+}

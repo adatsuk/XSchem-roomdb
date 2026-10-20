@@ -16,6 +16,24 @@ set -euo pipefail
 export HOME="${HOME:-/home/$(whoami)}"
 export PATH="$HOME/.local/bin:$PATH"
 
+# Earliest wall-clock mark (before any /mnt/c probe).
+_LAUNCH_T0="$(date +%s%3N 2>/dev/null || date +%s)"
+LAUNCH_LOG="${XSCHEM_LAUNCH_LOG:-${TMPDIR:-/tmp}/xschem-libman-launch.log}"
+export XSCHEM_LAUNCH_LOG="$LAUNCH_LOG"
+log_launch() {
+  printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date)" "$*" >>"$LAUNCH_LOG"
+}
+log_timing() {
+  local now label="$1"
+  now="$(date +%s%3N 2>/dev/null || date +%s)"
+  if [[ "$now" =~ ^[0-9]+$ && "${_LAUNCH_T0:-}" =~ ^[0-9]+$ ]]; then
+    log_launch "timing ${label}: $((now - _LAUNCH_T0))ms"
+  else
+    log_launch "timing ${label}"
+  fi
+}
+log_launch "script enter pid=$$"
+
 # LibMan still exports the older CORE_* names.
 if [[ -z "${ROOM_ROOT:-}" && -n "${CORE_ROOT:-}" ]]; then
   export ROOM_ROOT="$CORE_ROOT"
@@ -33,29 +51,25 @@ if [[ -z "${XSCHEM_OPEN_ROOM:-}" && -n "${XSCHEM_OPEN_CORE:-}" ]]; then
   export XSCHEM_OPEN_ROOM="$XSCHEM_OPEN_CORE"
 fi
 
-# IHP ngspice: ~/.spiceinit uses $PDK_ROOT/$PDK for .lib and osdi paths.
-if [[ -z "${PDK_ROOT:-}" ]]; then
-  for _pdk_root in \
-    "/mnt/c/Work/IHP" \
-    "$HOME/IHP-Open-PDK" \
-    "/mnt/c/Users/anton/Documents/IHP-Open-PDK"; do
-    if [[ -d "${_pdk_root}/ihp-sg13g2/libs.tech/ngspice/models" ]]; then
-      PDK_ROOT="$(readlink -f "$_pdk_root" 2>/dev/null || echo "$_pdk_root")"
-      export PDK_ROOT
-      break
-    fi
-  done
-fi
 export PDK="${PDK:-ihp-sg13g2}"
 
-# Mirror tiny PDK tree (models + osdi + xschem) into native WSL ext4 (~6MB).
-# Avoids slow /mnt/c/9p I/O during ngspice and symbol lookup.
+# Mirror tiny PDK tree into native WSL ext4. Never probe /mnt/c when cache is warm
+# (each failed -d on 9p costs hundreds of ms).
 sync_ihp_pdk_native_cache() {
   local cache="${IH_PDK_NATIVE_CACHE:-$HOME/.cache/ihp-pdk-wsl}"
-  local models_src=""
-  local osdi_src=""
-  local xschem_src=""
+  local models_dst="$cache/ihp-sg13g2/libs.tech/ngspice/models"
+  local osdi_dst="$cache/ihp-sg13g2/libs.tech/ngspice/osdi"
+  local force="${FORCE_PDK_SYNC:-0}"
 
+  if [[ "$force" != "1" \
+      && -d "$models_dst" && -n "$(ls -A "$models_dst" 2>/dev/null || true)" \
+      && -d "$osdi_dst" && -n "$(ls -A "$osdi_dst" 2>/dev/null || true)" ]]; then
+    export PDK_ROOT="$cache"
+    export PDK=ihp-sg13g2
+    return 0
+  fi
+
+  local models_src="" osdi_src="" xschem_src=""
   for _root in "/mnt/c/Work/IHP" "$HOME/IHP-Open-PDK" "/mnt/c/Users/anton/Documents/IHP-Open-PDK"; do
     if [[ -z "$models_src" && -d "${_root}/ihp-sg13g2/libs.tech/ngspice/models" ]]; then
       models_src="${_root}/ihp-sg13g2/libs.tech/ngspice/models"
@@ -72,23 +86,12 @@ sync_ihp_pdk_native_cache() {
     return 0
   fi
 
-  mkdir -p "$cache/ihp-sg13g2/libs.tech/ngspice/models" \
-           "$cache/ihp-sg13g2/libs.tech/ngspice/osdi" \
-           "$cache/ihp-sg13g2/libs.tech/xschem"
-  # Models/OSDI are small (~6MB) but rsync from /mnt/c still costs ~1–2s every launch.
-  # Only sync when the cache is empty (or FORCE_PDK_SYNC=1). Same for PDK xschem/.
-  local force="${FORCE_PDK_SYNC:-0}"
-  if [[ -n "$models_src" ]]; then
-    local models_dst="$cache/ihp-sg13g2/libs.tech/ngspice/models"
-    if [[ "$force" == "1" || -z "$(ls -A "$models_dst" 2>/dev/null || true)" ]]; then
-      rsync -a --size-only "$models_src/" "$models_dst/"
-    fi
+  mkdir -p "$models_dst" "$osdi_dst" "$cache/ihp-sg13g2/libs.tech/xschem"
+  if [[ -n "$models_src" && ( "$force" == "1" || -z "$(ls -A "$models_dst" 2>/dev/null || true)" ) ]]; then
+    rsync -a --size-only "$models_src/" "$models_dst/"
   fi
-  if [[ -n "$osdi_src" ]]; then
-    local osdi_dst="$cache/ihp-sg13g2/libs.tech/ngspice/osdi"
-    if [[ "$force" == "1" || -z "$(ls -A "$osdi_dst" 2>/dev/null || true)" ]]; then
-      rsync -a --size-only "$osdi_src/" "$osdi_dst/"
-    fi
+  if [[ -n "$osdi_src" && ( "$force" == "1" || -z "$(ls -A "$osdi_dst" 2>/dev/null || true)" ) ]]; then
+    rsync -a --size-only "$osdi_src/" "$osdi_dst/"
   fi
   if [[ -n "$xschem_src" ]]; then
     local xschem_dst="$cache/ihp-sg13g2/libs.tech/xschem"
@@ -143,20 +146,48 @@ sync_xschem_native_tree() {
   mkdir -p "$cache/integrations"
 
   # Prefer cheap updates of the hot path (room.tcl / roomtcl.so / xschemrc).
-  # Full integrations/ rsync across 9p was a common multi-minute stall.
-  # Skip copy when the cached file is already same size and not older than source.
+  # Text files: strip CR only (never delete letter "r" — bash tr -d "\r" is unsafe).
   sync_file_if_newer() {
     local src="$1" dst="$2"
     [[ -f "$src" ]] || return 0
-    if [[ -f "$dst" ]]; then
-      local ss sd
-      ss="$(stat -c '%s' "$src" 2>/dev/null || echo 0)"
-      sd="$(stat -c '%s' "$dst" 2>/dev/null || echo 1)"
-      if [[ "$ss" == "$sd" && ! "$src" -nt "$dst" ]]; then
+    case "$src" in
+      *.so|*.dll|*.dylib)
+        if [[ -f "$dst" ]]; then
+          local ss sd
+          ss="$(stat -c '%s' "$src" 2>/dev/null || echo 0)"
+          sd="$(stat -c '%s' "$dst" 2>/dev/null || echo 1)"
+          if [[ "$ss" == "$sd" && ! "$src" -nt "$dst" ]]; then
+            return 0
+          fi
+        fi
+        cp -f "$src" "$dst"
         return 0
+        ;;
+    esac
+    # Warm path: do NOT read src from /mnt/c (9p) every launch — that alone was ~5s.
+    # Only refresh when forced, missing, has CR, or missing critical tokens.
+    if [[ -f "$dst" && "${FORCE_XSCHEM_TREE_SYNC:-0}" != "1" ]]; then
+      if ! grep -q $'\r' "$dst" 2>/dev/null; then
+        case "$(basename "$dst")" in
+          xschemrc)
+            grep -q 'room_payload_dir' "$dst" 2>/dev/null && return 0
+            ;;
+          room.tcl)
+            grep -q 'proc room_materialize_symbol' "$dst" 2>/dev/null && return 0
+            ;;
+          *.sh|*.tcl|*.rc) return 0 ;;
+        esac
       fi
     fi
-    cp -f "$src" "$dst"
+    # Tcl text: strip CR only (never `tr -d "\r"` — that deletes letter r in bash).
+    python3 - "$src" "$dst" <<'PY'
+import pathlib, sys
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+data = src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+if dst.is_file() and dst.read_bytes() == data:
+    raise SystemExit(0)
+dst.write_bytes(data)
+PY
   }
   sync_file_if_newer "$XSCHEM_ROOT/xschemrc" "$cache/xschemrc"
   sync_file_if_newer "$XSCHEM_ROOT/integrations/room.tcl" "$cache/integrations/room.tcl"
@@ -235,8 +266,9 @@ stage_primitive_room_list() {
     fi
     dst="$cache/$rel"
     mkdir -p "$(dirname "$dst")"
-    if [[ -f "$dst" ]] && [[ ! "$src" -nt "$dst" ]] \
-        && [[ "$(stat -c '%s' "$src" 2>/dev/null || echo 0)" == "$(stat -c '%s' "$dst" 2>/dev/null || echo 1)" ]]; then
+    # Warm path: trust ext4 cache — do NOT stat src on /mnt/c (9p) every launch.
+    # Refresh only when forced or destination missing.
+    if [[ -f "$dst" && "${FORCE_ROOM_SOURCE_SYNC:-0}" != "1" ]]; then
       skipped=$((skipped + 1))
     else
       if cp -f "$src" "$dst" 2>/dev/null; then
@@ -262,6 +294,7 @@ stage_primitive_room_list() {
   fi
 }
 
+_ROOM_LIBS_STAGED=0
 if [[ -n "${ROOM_PRIMITIVE_LIBS_FILE:-}" ]]; then
   _list_file="$(wsl_path_if_windows "$ROOM_PRIMITIVE_LIBS_FILE")"
   if [[ -f "$_list_file" ]]; then
@@ -281,11 +314,13 @@ if [[ -n "${ROOM_PRIMITIVE_LIBS_FILE:-}" ]]; then
       export ROOM_PRIMITIVE_LIBS
       export ROOM_PRIMITIVE_LIB="${_converted[0]}"
       unset ROOM_PRIMITIVE_LIBS_FILE
+      _ROOM_LIBS_STAGED=1
     fi
   fi
 fi
 
-if [[ -n "${ROOM_PRIMITIVE_LIBS:-}" ]]; then
+# Skip re-stage when FILE path already produced ROOM_PRIMITIVE_LIBS (was ~2s twice).
+if [[ "$_ROOM_LIBS_STAGED" -eq 0 && -n "${ROOM_PRIMITIVE_LIBS:-}" ]]; then
   _converted=()
   while IFS= read -r _p; do
     _p="$(normalize_primitive_path "$_p" || true)"
@@ -303,7 +338,7 @@ if [[ -n "${ROOM_PRIMITIVE_LIBS:-}" ]]; then
   if [[ ${#_converted[@]} -gt 0 ]]; then
     export ROOM_PRIMITIVE_LIB="${_converted[0]}"
   fi
-elif [[ -n "${ROOM_PRIMITIVE_LIB:-}" ]]; then
+elif [[ "$_ROOM_LIBS_STAGED" -eq 0 && -n "${ROOM_PRIMITIVE_LIB:-}" ]]; then
   export ROOM_PRIMITIVE_LIB="$(wsl_path_if_windows "$ROOM_PRIMITIVE_LIB")"
 fi
 

@@ -22,7 +22,7 @@ if {![file exists $roompath]} {
 set data [coreapi_export_cell_data $roompath dc_isolbox]
 puts "OK: export [string length $data] bytes"
 
-if {[catch {xschem load_data $data -schname $roompath} err]} {
+if {[catch {xschem load_data -schname $roompath -nosymbols $data} err]} {
   puts stderr "FAIL: load_data: $err"
   exit 1
 }

@@ -109,12 +109,15 @@ proc room_ensure_loaded {} {
   if {[namespace which -command coreapi_list_cells] ne ""} {
     return
   }
+  room_log_timing "ensure_loaded: finding roomtcl.so"
   set lib [room_find_tcl_lib]
   if {$lib eq ""} {
     set build_script [file join $::XSCHEM_ROOT build-room-tcl.sh]
     error "roomtcl.so not found. Run: bash $build_script"
   }
+  room_log_timing "ensure_loaded: load $lib"
   load $lib Core
+  room_log_timing "ensure_loaded: done"
 }
 
 proc room_view_for_sch {schpath} {
@@ -364,10 +367,14 @@ proc room_symbol_index_signature {} {
 proc room_load_room_data {data roompath cell} {
   set logical [room_logical_schname $roompath $cell]
   catch {file mkdir [file dirname $logical]}
-  set load_args [list $data -schname $logical]
+  # xschem load_data parses flags only *before* the data blob; anything after
+  # is ignored. Wrong order used to drop -nosymbols/-schname → multi-minute
+  # symbol resolution on WSL (abs_sym_path over /mnt/c).
+  set load_args [list -schname $logical -nofullzoom]
   if {[llength [room_primitive_lib_paths]] > 0} {
     lappend load_args -nosymbols
   }
+  lappend load_args $data
   if {[catch {eval xschem load_data $load_args} err]} {
     error $err
   }
@@ -554,9 +561,7 @@ proc room_simulation_succeeded {code msg simdir} {
   if {$code == 0} {
     return 1
   }
-  foreach raw [list \
-    [file join $simdir test_inverter.raw] \
-    [file join $simdir tran.raw]] {
+  foreach raw [glob -nocomplain -directory $simdir *.raw] {
     if {[file exists $raw] && [file size $raw] > 100} {
       return 1
     }
@@ -567,6 +572,71 @@ proc room_simulation_succeeded {code msg simdir} {
   if {[regexp -nocase {TRAN done} $msg]} {
     return 1
   }
+  return 0
+}
+
+# Fix launcher tclcommand left as "... raw sp" from older exports.
+proc room_fix_sp_raw_launchers {} {
+  set names {}
+  catch {set names [xschem get instances]}
+  foreach inst $names {
+    if {[catch {set cmd [xschem getprop instance $inst tclcommand]}]} {
+      continue
+    }
+    if {$cmd eq "" || ![string match "*raw_read*" $cmd]} {
+      continue
+    }
+    set fixed $cmd
+    # trailing " sp" or " tran" after a *_sp.raw path → ac
+    if {[regsub {(_sp\.raw) sp\s*$} $fixed {\1 ac} fixed] \
+        || [regsub {(_sp\.raw) tran\s*$} $fixed {\1 ac} fixed] \
+        || [regsub { raw_read (\S+) sp\s*$} $fixed { raw_read \1 ac} fixed]} {
+      catch {xschem setprop instance $inst tclcommand $fixed}
+      room_log_launch "fixed launcher $inst raw type -> ac"
+    }
+  }
+}
+
+# Fit all layer-2 graph boxes to loaded raw (X=frequency, Y=traces).
+proc room_fit_graphs {} {
+  for {set i 0} {$i < 32} {incr i} {
+    if {[catch {xschem setprop rect 2 $i fullxzoom}]} {
+      break
+    }
+    catch {xschem setprop rect 2 $i fullyzoom}
+  }
+  catch {xschem redraw}
+}
+
+# ngspice "SP Analysis" is loaded by xschem as sim_type=ac (see save.c Plotname match).
+# Passing "sp" skips the dataset → empty graph + file picker for schname.raw.
+proc room_load_sim_raw {simdir} {
+  if {$simdir eq "" || ![file isdirectory $simdir]} {
+    return 0
+  }
+  set candidates [concat \
+    [lsort -dictionary [glob -nocomplain -directory $simdir *_sp.raw]] \
+    [lsort -dictionary [glob -nocomplain -directory $simdir *.raw]]]
+  foreach raw $candidates {
+    if {![file exists $raw] || [file size $raw] < 100} {
+      continue
+    }
+    # Try ac first (SP/AC), then bare read, then tran.
+    foreach typ {ac {} tran} {
+      set ok 0
+      if {$typ eq ""} {
+        set ok [expr {![catch {xschem raw_read $raw}]}]
+      } else {
+        set ok [expr {![catch {xschem raw_read $raw $typ}]}]
+      }
+      if {$ok} {
+        room_log_launch "raw_read ok ([expr {$typ eq {} ? {auto} : $typ}]): $raw"
+        room_fit_graphs
+        return 1
+      }
+    }
+  }
+  room_log_launch "raw_read failed in $simdir"
   return 0
 }
 
@@ -684,7 +754,6 @@ proc room_prepare_for_simulate {} {
     room_add_hierarchy_search_paths $roompath
   }
   # Native load_data may leave schname pointing at a path that is not on disk yet.
-  # Batch netlist and hierarchy staging need a real .sch file.
   if {$sch ne "" && ![file exists $sch]} {
     if {[catch {set data [xschem get_data]}]} {
       set data ""
@@ -694,18 +763,22 @@ proc room_prepare_for_simulate {} {
       catch {room_write_sch_data $sch $data}
     }
   }
-  if {$sch ne "" && [file exists $sch]} {
-    catch {xschem load $sch}
+  # Do NOT reload the schematic / rebuild the 177-primitive index / spawn symbol
+  # reloads on every Simulate — that alone was multi-second on WSL. Index was
+  # built at open; only refresh pathlist.
+  if {![info exists ::room_primitive_setup_done]} {
+    room_preload_primitives
+    set ::room_primitive_setup_done 1
   }
-  room_preload_primitives
-  room_finish_primitive_setup
-  catch {xschem reload_symbols}
-  catch {xschem redraw}
+  room_refresh_pathlist
 }
 
-# LibMan/ROOM: same netlist path as Simulate (batch + xschem-batch.rc), not interactive netlist.
+# Prefer in-process `xschem netlist` (ms). Batch `xschem -n` is a cold start and
+# was the multi-minute LibMan Simulate cost; keep it only as fallback.
 proc room_ensure_netlist {d {sch ""} {batch_err_var ""}} {
+  set t0 [clock milliseconds]
   room_prepare_for_simulate
+  room_log_timing "sim: after prepare (+[expr {[clock milliseconds]-$t0}]ms wall)"
   if {$sch eq ""} {
     set sch [xschem get schname]
   }
@@ -717,29 +790,188 @@ proc room_ensure_netlist {d {sch ""} {batch_err_var ""}} {
       catch {room_write_sch_data $sch $data}
     }
   }
-  if {$sch ne "" && [file exists $sch]} {
-    if {[catch {set nf [room_batch_netlist $d $sch]} err]} {
-      set batch_err_msg $err
-      puts "batch netlist: $err"
-    }
+  if {$nf eq "" && $sch ne ""} {
+    set nf [file join $d [file rootname [file tail $sch]].spice]
   }
-  if {$nf eq "" || ![file exists $nf] || ![room_netlist_looks_valid $nf]} {
-    catch {xschem netlist}
+  if {$nf eq ""} {
     set nf [file join $d [xschem get netlist_name fallback]]
   }
-  if {$nf eq "" || ![file exists $nf]} {
-    if {$sch ne ""} {
-      set nf [file join $d [file rootname [file tail $sch]].spice]
+  # Reuse previous spice when schematic file is unchanged (avoids ~30s netlist on WSL).
+  set reused 0
+  if {$nf ne "" && [file exists $nf] && [file exists $sch] \
+      && [file mtime $nf] >= [file mtime $sch] && [room_netlist_looks_valid $nf]} {
+    if {![catch {set fh [open $nf r]}]} {
+      set prev [read $fh]
+      close $fh
+      if {[string match "*.control*" $prev] || [string match "*\nsp *" $prev] \
+          || [string match "* spectre_format=*" $prev]} {
+        set reused 1
+        room_log_launch "sim: reuse netlist (sch mtime unchanged)"
+      }
+    }
+  }
+  if {!$reused} {
+    # Fast path: netlist inside the already-running GUI xschem.
+    set t1 [clock milliseconds]
+    catch {xschem netlist}
+    set nf2 [file join $d [xschem get netlist_name fallback]]
+    if {$nf2 ne "" && [file exists $nf2]} {
+      set nf $nf2
+    }
+    room_log_launch "sim: in-process netlist [expr {[clock milliseconds]-$t1}]ms -> $nf"
+  }
+  if {$nf eq "" || ![file exists $nf] || ![room_netlist_looks_valid $nf]} {
+    if {$sch ne "" && [file exists $sch]} {
+      room_log_launch "sim: falling back to batch xschem -n"
+      set t2 [clock milliseconds]
+      if {[catch {set nf [room_batch_netlist $d $sch]} err]} {
+        set batch_err_msg $err
+        puts "batch netlist: $err"
+      } else {
+        room_log_launch "sim: batch netlist [expr {[clock milliseconds]-$t2}]ms"
+      }
     }
   }
   if {$nf ne "" && [file exists $nf]} {
     room_inject_lookalike_spice_includes $nf
+    room_fix_spice_for_ngspice $nf
   }
+  room_log_launch "sim: ensure_netlist total [expr {[clock milliseconds]-$t0}]ms"
   if {$batch_err_var ne ""} {
     upvar 1 $batch_err_var batch_err_out
     set batch_err_out $batch_err_msg
   }
   return $nf
+}
+
+# Pull code_shown / .SP / NutmegEq `value=` bodies from the open schematic when
+# a broken devices/code_shown.sym netlisted as bare `spectre_format=`.
+proc room_code_shown_values_from_sch {} {
+  set values {}
+  set sch ""
+  catch {set sch [xschem get schname]}
+  if {$sch eq "" || ![file exists $sch]} {
+    return $values
+  }
+  if {[catch {set fh [open $sch r]}]} {
+    return $values
+  }
+  set text [read $fh]
+  close $fh
+  # Instances: C {…code_shown.sym…} … {name=… value="...." …}
+  set rest $text
+  while {[regexp -indices {C \{[^\}]*code_shown\.sym[^\}]*\}[^\{\n]*\{} $rest m]} {
+    set start [lindex $m 1]
+    # Find matching close brace for the attr block (value= may span lines).
+    set depth 0
+    set i $start
+    set attr ""
+    while {$i < [string length $rest]} {
+      set ch [string index $rest $i]
+      append attr $ch
+      if {$ch eq "\{"} {
+        incr depth
+      } elseif {$ch eq "\}"} {
+        incr depth -1
+        if {$depth == 0} {
+          break
+        }
+      }
+      incr i
+    }
+    if {[regexp {value="((?:[^"\\]|\\.)*)"} $attr -> val]} {
+      set val [string map {\\\" \" \\\\ \\} $val]
+      if {[string match "*.control*" $val] || [string match "*sp *" $val] \
+          || [string match "*let *" $val]} {
+        lappend values $val
+      }
+    } elseif {[regexp {value=\{([^\}]*)\}} $attr -> val]} {
+      if {[string match "*.control*" $val] || [string match "*sp *" $val]} {
+        lappend values $val
+      }
+    }
+    set rest [string range $rest [expr {$i + 1}] end]
+  }
+  return $values
+}
+
+# Post-process netlist for ngspice quirks that Qucs/ROOM still emit.
+proc room_fix_spice_for_ngspice {nf} {
+  if {$nf eq "" || ![file exists $nf]} {
+    return
+  }
+  if {[catch {set fh [open $nf r]}]} {
+    return
+  }
+  set body [read $fh]
+  close $fh
+  set orig $body
+  # Broken code_shown.sym (format=" spectre_format=") emits these alone.
+  regsub -all -nocase {\n[[:space:]]*spectre_format=[[:space:]]*} $body "\n" body
+  # If .control blocks vanished, reinject from schematic instance values.
+  if {![string match "*.control*" $body]} {
+    set injected ""
+    foreach val [room_code_shown_values_from_sch] {
+      append injected "\n$val\n"
+    }
+    if {$injected ne ""} {
+      if {[regexp -nocase -indices {\n\*\*\*\* begin user architecture code\n} $body m]} {
+        set b [lindex $m 1]
+        set body "[string range $body 0 $b]$injected[string range $body [expr {$b + 1}] end]"
+      } elseif {[regexp -nocase -indices {\n\.end[[:space:]]*(\n|$)} $body m]} {
+        set a [lindex $m 0]
+        set body "[string range $body 0 [expr {$a - 1}]]$injected[string range $body $a end]"
+      } else {
+        append body $injected
+      }
+      room_log_launch "reinjected code_shown .control from schematic"
+    }
+  }
+  # Qucs .SP Type=log → ngspice `sp dec` (there is no `sp log`).
+  regsub -all -nocase {(\msp[[:space:]]+)log([[:space:]])} $body {\1dec\2} body
+  # Only port 1 is driven for .sp (Qucs Pac Num=2 should be ac 0).
+  regsub -all -nocase {ac[[:space:]]+1([[:space:]]+portnum[[:space:]]+[2-9])} $body {ac 0\1} body
+  # Drop empty lookalike stub .subckt … .ends (real body comes from .include).
+  while {[regexp -nocase -indices \
+      {\n\* expanding[^\n]*\n(?:\*\*[^\n]*\n)*\.subckt[[:space:]]+(\S+)[^\n]*\n\.ends\n} \
+      $body m]} {
+    set a [lindex $m 0]
+    set b [lindex $m 1]
+    set body "[string range $body 0 [expr {$a - 1}]][string range $body [expr {$b + 1}] end]"
+  }
+  # Qucs emits two .control blocks: SP writes the raw *before* NutmegEq `let S*_dB=...`.
+  # Graphs need those vectors in the raw — move every `write …` to a final .control.
+  set writes {}
+  while {[regexp -nocase -indices {\n[[:space:]]*write[[:space:]]+[^\n]+} $body m]} {
+    set a [lindex $m 0]
+    set b [lindex $m 1]
+    set line [string trim [string range $body $a $b]]
+    if {$line ne "" && [lsearch -exact $writes $line] < 0} {
+      lappend writes $line
+    }
+    set body "[string range $body 0 [expr {$a - 1}]][string range $body [expr {$b + 1}] end]"
+  }
+  if {[llength $writes] > 0} {
+    set tail "\n.control\n"
+    foreach w $writes {
+      append tail "$w\n"
+    }
+    append tail ".endc\n"
+    if {[regexp -nocase -indices {\n\.end[[:space:]]*(\n|$)} $body m]} {
+      set a [lindex $m 0]
+      set body "[string range $body 0 [expr {$a - 1}]]$tail[string range $body $a end]"
+    } else {
+      append body $tail
+    }
+  }
+  if {$body eq $orig} {
+    return
+  }
+  if {![catch {set fh [open $nf w]}]} {
+    puts -nonewline $fh $body
+    close $fh
+    room_log_launch "fixed spice for ngspice: $nf"
+  }
 }
 
 proc room_report_sim_result {code msg nf d} {
@@ -808,13 +1040,19 @@ proc room_install_simulate_hook {} {
       cd $d
       room_ensure_pdk_env
       puts "Running: ngspice -b $nf"
+      set tng [clock milliseconds]
       set code [catch {exec ngspice -b $nf} msg]
+      room_log_launch "sim: ngspice [expr {[clock milliseconds]-$tng}]ms code=$code"
       cd $save
       if {$msg ne ""} {
         puts $msg
       }
       if {[room_simulation_succeeded $code $msg $d]} {
         set code 0
+      }
+      # Load SP/AC raw into graphs (xschem tags "SP Analysis" as sim_type=ac).
+      if {$code == 0} {
+        room_load_sim_raw $d
       }
       room_report_sim_result $code $msg $nf $d
       if {$callback ne ""} {
@@ -839,6 +1077,7 @@ proc room_install_simulate_hook {} {
 }
 
 proc room_open {roompath {cell ""}} {
+  room_log_timing "room_open start path=$roompath"
   room_ensure_loaded
   if {![file exists $roompath]} {
     tk_messageBox -icon error -message "ROOM file not found:\n$roompath"
@@ -850,10 +1089,14 @@ proc room_open {roompath {cell ""}} {
   }
   set roompath [file normalize $roompath]
   # Stage off /mnt/c before any Cap'n Proto / cell-list I/O (avoids p9_client_rpc hangs).
+  room_log_timing "room_open before stage"
   set readpath [room_stage_room_for_read $roompath]
+  room_log_timing "room_open after stage readpath=$readpath"
   if {$cell eq ""} {
     set guess [room_guess_cell_name $roompath]
+    room_log_timing "room_open before list_cells"
     set cells [room_list_cells $readpath]
+    room_log_timing "room_open after list_cells n=[llength $cells]"
     if {[llength $cells] == 0} {
       tk_messageBox -icon error -message "No cells in:\n$roompath"
       return
@@ -872,22 +1115,37 @@ proc room_open {roompath {cell ""}} {
   set ::room_active_roompath $roompath
   set ::room_active_cell $cell
   room_add_hierarchy_search_paths $roompath
-  # Defer primitive index build so the window appears before walking /mnt/c libs.
-  after idle room_preload_primitives
+  # Index is cheap on staged paths; do it before load (startup idle may already have).
+  room_log_timing "room_open before symbol index"
+  room_preload_primitives
+  set ::room_primitive_setup_done 1
+  room_log_timing "room_open after symbol index"
   if {[room_has_native_bridge]} {
+    room_log_timing "room_open before export_cell_data"
     if {[catch {set data [coreapi_export_cell_data $readpath $cell]} err]} {
       tk_messageBox -icon error -message "Failed to open ROOM:\n$err"
       return
     }
+    room_log_timing "room_open after export_cell_data bytes=[string length $data]"
+    room_log_timing "room_open before load_data"
     if {[catch {room_load_room_data $data $roompath $cell} err]} {
       tk_messageBox -icon error -message "Failed to load ROOM into xschem:\n$err"
       return
     }
+    room_log_timing "room_open after load_data"
     room_apply_cell_names $roompath $cell
     room_schedule_title_refresh
     room_schedule_primitive_reload
-    after 300 [list room_netlist_when_ready 0 $cell]
+    # Do not auto-netlist on open — blocks the UI for seconds/minutes on WSL.
+    room_log_timing "room_open before lock"
     room_lock_on_open $roompath
+    room_log_timing "room_open done (native); schedule READY"
+    after idle {
+      room_ensure_window_geometry
+      room_view_all
+      room_log_timing "READY_FOR_WORK idle"
+      room_log_launch "READY_FOR_WORK (native bridge) sch=[xschem get schname]"
+    }
     return
   }
   set view [room_view_from_path $roompath]
@@ -897,17 +1155,27 @@ proc room_open {roompath {cell ""}} {
   } else {
     set sch [room_temp_sch_path $cell $ext]
   }
+  room_log_timing "room_open before export_cell_to_sch"
   if {[catch {room_export_cell_to_sch $readpath $cell $sch} err]} {
     tk_messageBox -icon error -message "Failed to open ROOM:\n$err"
     return
   }
+  room_log_timing "room_open after export; before xschem load"
   room_set_binding $sch $roompath
   xschem load $sch
+  room_log_timing "room_open after xschem load"
   room_apply_cell_names $roompath $cell
   room_schedule_title_refresh
   room_schedule_primitive_reload
-  after 300 [list room_netlist_when_ready 0 $cell]
+  # Do not auto-netlist on open — blocks the UI for seconds/minutes on WSL.
   room_lock_on_open $roompath
+  room_log_timing "room_open done (file); schedule READY"
+  after idle {
+    room_ensure_window_geometry
+    room_view_all
+    room_log_timing "READY_FOR_WORK idle"
+    room_log_launch "READY_FOR_WORK (file bridge) sch=[xschem get schname]"
+  }
 }
 
 proc room_refresh_window_title {{mod {}}} {
@@ -1103,6 +1371,15 @@ proc room_log_launch {msg} {
   }
 }
 
+# Cumulative ms since first call in this process (for open-latency profiling).
+proc room_log_timing {label} {
+  if {![info exists ::room_timing_t0]} {
+    set ::room_timing_t0 [clock milliseconds]
+  }
+  set dt [expr {[clock milliseconds] - $::room_timing_t0}]
+  room_log_launch "timing +${dt}ms $label"
+}
+
 proc room_install_file_hooks {} {
   if {[catch {set topwin [xschem get top_path]}]} {
     after 500 room_install_file_hooks
@@ -1188,6 +1465,11 @@ proc room_add_menu {} {
     $topwin.menubar.room add command -label "Save to $liblabel" -command room_save_current
     $topwin.menubar.room add command -label "Sync payload folder" -command room_sync_payload
   }
+}
+
+# View → Zoom Full (menu "Zoom Full" / key F).
+proc room_view_all {} {
+  catch {xschem zoom_full}
 }
 
 proc room_ensure_window_geometry {} {
@@ -1504,6 +1786,7 @@ proc room_materialize_symbol {symref} {
     return $::room_symbol_materialized($symref)
   }
 
+  room_log_timing "materialize begin $symref"
   set roompath $::room_symbol_index($symref)
   room_ensure_loaded
   set parsed [coreapi_parse_core_path $roompath]
@@ -1532,10 +1815,18 @@ proc room_materialize_symbol {symref} {
   }
   file mkdir $outdir
   set sym [file join $outdir "$cell.sym"]
-  if {[catch {coreapi_export_cell $roompath $cell $sym} err]} {
+  set cache_hit 0
+  # Reuse warm cache when present (lookalike export+S2Spice is multi-second).
+  # Still run lookalike pin patches — stale cache often keeps lab= / fractional pins.
+  if {[file exists $sym] && [file size $sym] > 0} {
+    set cache_hit 1
+    room_log_timing "materialize cache-hit $symref"
+  } elseif {[catch {coreapi_export_cell $roompath $cell $sym} err]} {
     puts stderr "Failed to materialize ROOM symbol $symref from $roompath: $err"
     room_log_launch "materialize FAILED $symref: $err"
     return ""
+  } else {
+    room_log_timing "materialize after export $symref"
   }
   # Lookalike symbols: coreapi_export_cell also writes sibling cell.spice (S2Spice from emmodel).
   set spice [file rootname $sym].spice
@@ -1544,33 +1835,109 @@ proc room_materialize_symbol {symref} {
   }
   # type=subcircuit still makes xschem probe for sibling .sch (descend / hierarchy).
   # spice_stop lookalikes have no schematic — write a stub so the Alert goes away.
-  set sch [file rootname $sym].sch
-  if {![file exists $sch]} {
-    set looks 0
-    if {[catch {set sfh [open $sym r]}]} {
-      set looks 0
-    } else {
-      set sbody [read $sfh]
-      close $sfh
-      if {[string match "*spice_stop=true*" $sbody] || [string match "*em.lookalike=1*" $sbody]} {
-        set looks 1
+  # Also patch sym: default_schematic=ignore (skip empty .subckt) and drop lab= on pins
+  # (lab= on B-rects isolates Pac/DUT nets from wires in xschem touch()).
+  set looks 0
+  set sbody ""
+  if {![catch {set sfh [open $sym r]}]} {
+    set sbody [read $sfh]
+    close $sfh
+    if {[string match "*spice_stop=true*" $sbody] || [string match "*em.lookalike=1*" $sbody]} {
+      set looks 1
+    }
+  }
+  if {($looks || [file exists $spice]) && $sbody ne ""} {
+    set patched $sbody
+    set changed 0
+    if {![string match "*default_schematic=ignore*" $patched]} {
+      if {[regsub {spice_stop=true} $patched {spice_stop=true default_schematic=ignore} patched]} {
+        set changed 1
+      } elseif {[regsub {em.lookalike=1} $patched {em.lookalike=1 default_schematic=ignore} patched]} {
+        set changed 1
       }
     }
-    if {$looks || [file exists $spice]} {
-      if {![catch {set ofh [open $sch w]}]} {
-        puts $ofh "v {xschem version=3.4.4 file_version=1.2}"
-        puts $ofh "G {}"
-        puts $ofh "K {em.lookalike_stub=1}"
-        puts $ofh "V {}"
-        puts $ofh "S {}"
-        puts $ofh "E {}"
+    # Strip "lab=TOKEN " from pin attr blocks (keep name=).
+    set newp ""
+    set rest $patched
+    while {[regexp -indices {lab=[^[:space:]]+ } $rest m]} {
+      set a [lindex $m 0]
+      set b [lindex $m 1]
+      append newp [string range $rest 0 [expr {$a - 1}]]
+      set rest [string range $rest [expr {$b + 1}] end]
+      set changed 1
+    }
+    append newp $rest
+    set patched $newp
+    # Snap pin B-rect coords to integers (xschem touch() is exact FP).
+    set snapped ""
+    set rest $patched
+    while {[regexp -indices {B[[:space:]]+5[[:space:]]+(-?[0-9.]+)[[:space:]]+(-?[0-9.]+)[[:space:]]+(-?[0-9.]+)[[:space:]]+(-?[0-9.]+)} $rest m]} {
+      set a [lindex $m 0]
+      set b [lindex $m 1]
+      set chunk [string range $rest $a $b]
+      if {[regexp {B[[:space:]]+5[[:space:]]+(-?[0-9.]+)[[:space:]]+(-?[0-9.]+)[[:space:]]+(-?[0-9.]+)[[:space:]]+(-?[0-9.]+)} $chunk -> x1 y1 x2 y2]} {
+        set ix1 [expr {round($x1)}]
+        set iy1 [expr {round($y1)}]
+        set ix2 [expr {round($x2)}]
+        set iy2 [expr {round($y2)}]
+        if {$ix1 != $x1 || $iy1 != $y1 || $ix2 != $x2 || $iy2 != $y2} {
+          set chunk "B 5 $ix1 $iy1 $ix2 $iy2"
+          set changed 1
+        }
+      }
+      append snapped [string range $rest 0 [expr {$a - 1}]] $chunk
+      set rest [string range $rest [expr {$b + 1}] end]
+    }
+    append snapped $rest
+    set patched $snapped
+    if {$changed && ![catch {set ofh [open $sym w]}]} {
+      puts -nonewline $ofh $patched
+      close $ofh
+    }
+  }
+  if {$looks || [file exists $spice]} {
+    set stubbody "v {xschem version=3.4.4 file_version=1.2}\nG {}\nK {em.lookalike_stub=1}\nV {}\nS {}\nE {}\n"
+    set stubdirs [list [file dirname $sym]]
+    if {![catch {set cursch [xschem get schname]}] && $cursch ne ""} {
+      lappend stubdirs [file dirname [file normalize $cursch]]
+    }
+    if {[info exists ::env(netlist_dir)] && $::env(netlist_dir) ne ""} {
+      lappend stubdirs $::env(netlist_dir)
+    }
+    catch {
+      global netlist_dir
+      if {[info exists netlist_dir] && $netlist_dir ne ""} {
+        lappend stubdirs $netlist_dir
+      }
+    }
+    foreach d [lsort -unique $stubdirs] {
+      if {$d eq "" || ![file isdirectory $d]} {
+        continue
+      }
+      set stub [file join $d "$cell.sch"]
+      if {![catch {set ofh [open $stub w]}]} {
+        puts -nonewline $ofh $stubbody
         close $ofh
+      }
+      set localsym [file join $d "$cell.sym"]
+      if {$localsym ne $sym} {
+        catch {file copy -force $sym $localsym}
+      }
+      if {[file exists $spice]} {
+        set localspice [file join $d "$cell.spice"]
+        if {$localspice ne $spice} {
+          catch {file copy -force $spice $localspice}
+        }
       }
     }
   }
   set ::room_symbol_materialized($symref) $sym
   room_refresh_pathlist
-  room_log_launch "materialized $symref -> $sym"
+  if {$cache_hit} {
+    room_log_launch "materialized $symref -> $sym (cache+patch)"
+  } else {
+    room_log_launch "materialized $symref -> $sym"
+  }
   return $sym
 }
 
@@ -1581,6 +1948,8 @@ proc room_schedule_primitive_reload {} {
       room_refresh_pathlist
       catch {xschem reload_symbols}
       catch {xschem redraw}
+      # Re-fit after symbols appear (open used -nofullzoom for speed).
+      room_view_all
     }
   }
 }
@@ -1828,8 +2197,10 @@ proc room_install_wsl_execute_hook {} {
   }
 }
 
-# Fast filename-only index before ROOM load; reload_symbols again after open/scripts.
+# Install hooks, index primitives (cheap on staged ext4 paths), then open.
+# Index-before-load avoids "Symbol not found" + multi-second reload/materialize.
 after idle {
+  room_log_timing "startup idle: begin"
   room_install_title_hooks
   room_install_file_hooks
   room_install_simulate_hook
@@ -1839,16 +2210,18 @@ after idle {
   room_install_abs_sym_path_hook
   room_lock_install_hooks
   room_register_system_devices
+  room_log_timing "startup idle: hooks done"
   room_build_symbol_index
   room_refresh_pathlist
   set ::room_primitive_setup_done 1
+  room_log_timing "startup idle: before open_deferred"
   room_open_deferred
+  room_fix_sp_raw_launchers
+  room_log_timing "startup idle: after open_deferred"
   after 50 room_ensure_window_geometry
   after 150 room_ensure_window_geometry
   after 600 room_ensure_window_geometry
   after 1500 room_ensure_window_geometry
   after 800 room_install_file_hooks
   after 2000 room_install_file_hooks
-  # Light refresh only — room_build_symbol_index already ran above.
-  room_schedule_primitive_reload
 }
