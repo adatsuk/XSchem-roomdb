@@ -170,10 +170,13 @@ sync_xschem_native_tree() {
       if ! grep -q $'\r' "$dst" 2>/dev/null; then
         case "$(basename "$dst")" in
           xschemrc)
-            grep -q 'room_payload_dir' "$dst" 2>/dev/null && return 0
+            # Bump when LibMan-critical xschemrc settings change (colors, geometry, …).
+            grep -q 'set dark_colorscheme 0' "$dst" 2>/dev/null && return 0
             ;;
           room.tcl)
-            grep -q 'proc room_materialize_symbol' "$dst" 2>/dev/null && return 0
+            # Bump this token when LibMan-critical room.tcl behavior changes so the
+            # warm cache picks up the Windows tree without FORCE_XSCHEM_TREE_SYNC.
+            grep -q 'load_args.*-nodraw' "$dst" 2>/dev/null && return 0
             ;;
           *.sh|*.tcl|*.rc) return 0 ;;
         esac
@@ -194,6 +197,26 @@ PY
   sync_file_if_newer "$XSCHEM_ROOT/integrations/room_lock.tcl" "$cache/integrations/room_lock.tcl"
   sync_file_if_newer "$XSCHEM_ROOT/integrations/roomtcl.so" "$cache/integrations/roomtcl.so"
   sync_file_if_newer "$XSCHEM_ROOT/integrations/coretcl.so" "$cache/integrations/coretcl.so"
+
+  # Keep seeded symbols (analogLib/Pac.sym etc.) on the native tree. The warm
+  # path only syncs a few hot files; without this, a wiped Windows cache or
+  # stash leaves Xschem with "Symbol not found" after open.
+  local src_pc="$XSCHEM_ROOT/integrations/primitive_cache"
+  local dst_pc="$cache/integrations/primitive_cache"
+  if [[ -d "$src_pc" ]]; then
+    mkdir -p "$dst_pc"
+    if [[ "${FORCE_XSCHEM_TREE_SYNC:-0}" == "1" \
+        || ! -f "$dst_pc/analogLib/Pac.sym" \
+        || ! -f "$dst_pc/analogLib/GND.sym" \
+        || "$src_pc/analogLib/Pac.sym" -nt "$dst_pc/analogLib/Pac.sym" ]]; then
+      if command -v rsync >/dev/null 2>&1; then
+        rsync -a --size-only "$src_pc/" "$dst_pc/"
+      else
+        cp -a "$src_pc/." "$dst_pc/"
+      fi
+      log_launch "synced primitive_cache -> $dst_pc"
+    fi
+  fi
 
   if [[ -f "$cache/xschemrc" && -f "$cache/integrations/room.tcl" ]]; then
     XSCHEM_ROOT="$cache"
@@ -430,35 +453,16 @@ if [[ ! -f "$INPUT" ]]; then
   exit 1
 fi
 
-# Corrupted ~/.xschem/geometry hides the window (1x1, 0x0, off-screen coords).
-# Also drop saved geometry for this file and ephemeral ROOM temp paths so
-# xschemrc initial_geometry {1300x950} applies on launch.
+# Corrupted ~/.xschem/geometry hides the window (1x1 / untitled). After the
+# Smith rebuild Xschem often writes untitled.sch as 1x1 before ROOM open, so
+# the window is invisible even though the process is alive. Wipe the file so
+# xschemrc initial_geometry {1300x950} always applies for LibMan launches.
 scrub_geometry_file() {
   local geom="${HOME}/.xschem/geometry"
-  local target="${1:-}"
-  [[ -f "$geom" ]] || return 0
-
-  local tmp="${geom}.tmp"
-  awk -v target="$target" '
-    function bad_size(w, h) {
-      return (w < 200 || h < 200)
-    }
-    function bad_position(pos) {
-      return (pos ~ /\+-[0-9]+/ || pos ~ /\+[0-9]+\+-[0-9]+/)
-    }
-    {
-      line = $0
-      if (line ~ /1x1\+|0x0\+/) next
-      if (index(line, "untitled") > 0) next
-      if (target != "" && index(line, target) > 0) next
-      if (index(line, "/tmp/xschem_room_") > 0) next
-      if (match(line, /\{([0-9]+)x([0-9]+)([^}]*)\}/, sz)) {
-        if (bad_size(sz[1], sz[2])) next
-        if (bad_position(sz[3])) next
-      }
-      print line
-    }
-  ' "$geom" >"$tmp" && mv "$tmp" "$geom" || rm -f "$tmp"
+  mkdir -p "${HOME}/.xschem"
+  # Nuclear reset: per-file sizes are not worth the invisible-window risk.
+  rm -f "$geom"
+  log_launch "geometry scrubbed (removed $geom)"
 }
 scrub_geometry_file "$INPUT"
 

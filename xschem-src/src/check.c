@@ -100,7 +100,7 @@ void update_conn_cues(int layer, int draw_cues, int dr_win)
       }
     }
   }
-  dbg(3, "update_conn_cues(): check3\n");
+  dbg(3, ("update_conn_cues(): check3\n"));
   if(draw_cues) {
     save_draw = xctx->draw_window; xctx->draw_window = dr_win;
     for(init_wire_iterator(&ctx, x1, y1, x2, y2); ( wireptr = wire_iterator_next(&ctx) ) ;) {
@@ -160,6 +160,7 @@ void trim_wires(void)
   Wireentry *wptr;
   unsigned short *wireflag=NULL;
 
+  (void) doloops;
   doloops = 0;
   xctx->prep_hash_wires = 0;
   /* timer(0); */
@@ -173,6 +174,7 @@ void trim_wires(void)
     /* break all wires */
     for(i=0;i<xctx->wires; ++i) {
       int hashloopcnt = 0;
+      (void) hashloopcnt;
       if(skip_wire(i)) continue;
       x0 = xctx->wire[i].x1;
       y0 = xctx->wire[i].y1;
@@ -195,12 +197,12 @@ void trim_wires(void)
         ++hashloopcnt;
         breaks = check_breaks(xctx->wire[j].x1, xctx->wire[j].y1, xctx->wire[j].x2, xctx->wire[j].y2, x0, y0);
         if(breaks) { /* wire[i] breaks wire[j] */
-          dbg(2, "trim_wires(): %d (%g %g %g %g) breaks %d (%g %g %g %g) in (%g, %g)\n", i,
+          dbg(2, ("trim_wires(): %d (%g %g %g %g) breaks %d (%g %g %g %g) in (%g, %g)\n", i,
             xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2,
             j,
             xctx->wire[j].x1, xctx->wire[j].y1, xctx->wire[j].x2, xctx->wire[j].y2,
             x0, y0
-          );
+          ));
           check_wire_storage();
           xctx->wire[xctx->wires].x1=xctx->wire[j].x1;
           xctx->wire[xctx->wires].y1=xctx->wire[j].y1;
@@ -239,7 +241,7 @@ void trim_wires(void)
           break;
         }
       }
-      dbg(2, "trim_wires(): hashloopcnt = %d, wires = %d\n", hashloopcnt, xctx->wires);
+      dbg(2, ("trim_wires(): hashloopcnt = %d, wires = %d\n", hashloopcnt, xctx->wires));
     }
     /* dbg(1, "trim_wires(): break: %g\n", timer(1)); */
     /* reduce included wires */
@@ -270,11 +272,11 @@ void trim_wires(void)
         includes = check_includes(xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2,
                                   xctx->wire[j].x1, xctx->wire[j].y1, xctx->wire[j].x2, xctx->wire[j].y2);
         if(includes) {
-          dbg(2, "trim_wires(): %d (%g %g %g %g) include %d (%g %g %g %g)\n", i,
+          dbg(2, ("trim_wires(): %d (%g %g %g %g) include %d (%g %g %g %g)\n", i,
             xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2,
             j,
             xctx->wire[j].x1, xctx->wire[j].y1, xctx->wire[j].x2, xctx->wire[j].y2
-          );
+          ));
           wireflag[j] = 1;
         }
       }
@@ -370,7 +372,7 @@ void trim_wires(void)
             xctx->wire[j].x1 == x0 && xctx->wire[j].y1 == y0 &&
             /* no other connecting wires */
             xctx->wire[i].end2 == 0 && xctx->wire[j].end1 == 0 ) {
-          dbg(2, "trim_wires(): i=%d merged with j=%d\n", i, j);
+          dbg(2, ("trim_wires(): i=%d merged with j=%d\n", i, j));
           xctx->wire[i].x2 = xctx->wire[j].x2;
           xctx->wire[i].y2 = xctx->wire[j].y2;
           if(xctx->wire[j].sel) xctx->wire[i].sel = xctx->wire[j].sel;
@@ -411,7 +413,7 @@ void trim_wires(void)
       set_modify(1);
     }
   } while(changed);
-  dbg(1, "trim_wires(): doloops=%d changed=%d\n", doloops, changed);
+  dbg(1, ("trim_wires(): doloops=%d changed=%d\n", doloops, changed));
   my_free(_ALLOC_ID_, &wireflag);
   update_conn_cues(WIRELAYER, 0, 0);
 }
@@ -432,7 +434,7 @@ static int touches_inst_pin(double x, double y, int inst)
       }
     }
   }
-  dbg(1, "touches_inst_pin(): %g %g : touches =%d on inst %d\n", x, y, touches, inst);
+  dbg(1, ("touches_inst_pin(): %g %g : touches =%d on inst %d\n", x, y, touches, inst));
   return touches;
 }
 
@@ -461,7 +463,7 @@ static int closest_point_calculation(double x1, double y1, double x2, double y2,
       if(sq_distance == 0) ret = 2;
       else if(sq_distance <  sq_cs) ret = 1;
     }
-    dbg(1, "x3 = %g y3=%g dist=%g ret=%d\n", x3, y3, sqrt(sq_distance), ret);
+    dbg(1, ("x3 = %g y3=%g dist=%g ret=%d\n", x3, y3, sqrt(sq_distance), ret));
   }
 
   if(ret == 1) {
@@ -484,7 +486,7 @@ void break_wires_at_point(double x0, double y0, int align)
   int changed=0;
   double x1, y1, x2, y2;
 
-  dbg(1, "break_wires_at_pins(): processing pin %g %g\n", x0, y0);
+  dbg(1, ("break_wires_at_pins(): processing pin %g %g\n", x0, y0));
   get_square(x0, y0, &sqx, &sqy);
   for(wptr=xctx->wire_spatial_table[sqx][sqy]; wptr; wptr=wptr->next) {
     i = wptr->n;
@@ -496,9 +498,9 @@ void break_wires_at_point(double x0, double y0, int align)
     if( r != 0 && (r == 1 || touch(x1, y1, x2, y2, x0,y0) )) {
       if( (x0 != x1 && x0 != x2) ||
           (y0 != y1 && y0 != y2) ) {
-        dbg(1, "break_wires_at_point(): processing wire %d: %g %g %g %g\n",
-            i, xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2);
-        if(!changed) { xctx->push_undo(); changed=1;}
+        dbg(1, ("break_wires_at_point(): processing wire %d: %g %g %g %g\n",
+            i, xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2));
+        if(!changed) { xctx->push_undo(0); changed=1;}
         check_wire_storage();
         xctx->wire[xctx->wires].x1=xctx->wire[i].x1;
         xctx->wire[xctx->wires].y1=xctx->wire[i].y1;
@@ -513,9 +515,9 @@ void break_wires_at_point(double x0, double y0, int align)
         xctx->wire[xctx->wires].bus = xctx->wire[i].bus;
         xctx->wire[xctx->wires].node=NULL;
         hash_wire(XINSERT, xctx->wires, 0);  /* insertion happens at beginning of list */
-        dbg(1, "break_wires_at_pins(): hashing new wire %d: %g %g %g %g\n",
+        dbg(1, ("break_wires_at_pins(): hashing new wire %d: %g %g %g %g\n",
             xctx->wires, xctx->wire[xctx->wires].x1, xctx->wire[xctx->wires].y1,
-                         xctx->wire[xctx->wires].x2, xctx->wire[xctx->wires].y2);
+                         xctx->wire[xctx->wires].x2, xctx->wire[xctx->wires].y2));
         my_strdup(_ALLOC_ID_, &xctx->wire[xctx->wires].node, xctx->wire[i].node);
         xctx->need_reb_sel_arr=1;
         xctx->wires++;
@@ -555,11 +557,12 @@ void break_wires_at_pins(int remove)
   /* break wires that touch selected instance pins */
   for(j=0;j<xctx->lastsel; ++j) if(xctx->sel_array[j].type==ELEMENT) {
     k = xctx->sel_array[j].n;
+    if(xctx->inst[k].ptr < 0) continue;
     if( (rects = (xctx->inst[k].ptr+ xctx->sym)->rects[PINLAYER]) > 0 )
     {
       for(r=0;r<rects;r++) {
         get_inst_pin_coord(k, r, &x0, &y0);
-        dbg(1, "break_wires_at_pins(): processing pin %g %g\n", x0, y0);
+        dbg(1, ("break_wires_at_pins(): processing pin %g %g\n", x0, y0));
         get_square(x0, y0, &sqx, &sqy);
         for(wptr=xctx->wire_spatial_table[sqx][sqy]; wptr; wptr=wptr->next) {
           i = wptr->n;
@@ -567,9 +570,9 @@ void break_wires_at_pins(int remove)
                     xctx->wire[i].x2, xctx->wire[i].y2, x0,y0) ) {
             if( (x0!=xctx->wire[i].x1 && x0!=xctx->wire[i].x2) ||
                 (y0!=xctx->wire[i].y1 && y0!=xctx->wire[i].y2) ) {
-              dbg(1, "break_wires_at_pins(): processing wire %d: %g %g %g %g\n",
-                  i, xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2);
-              if(!changed) { xctx->push_undo(); changed=1;}
+              dbg(1, ("break_wires_at_pins(): processing wire %d: %g %g %g %g\n",
+                  i, xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2));
+              if(!changed) { xctx->push_undo(0); changed=1;}
               check_wire_storage();
               if(!remove || !RECT_INSIDE(xctx->wire[i].x1, xctx->wire[i].y1, x0, y0,
                              xctx->inst[k].xx1, xctx->inst[k].yy1, xctx->inst[k].xx2, xctx->inst[k].yy2)
@@ -588,9 +591,9 @@ void break_wires_at_pins(int remove)
                 xctx->wire[xctx->wires].bus = xctx->wire[i].bus;
                 xctx->wire[xctx->wires].node=NULL;
                 hash_wire(XINSERT, xctx->wires, 0);  /* insertion happens at beginning of list */
-                dbg(1, "break_wires_at_pins(): hashing new wire %d: %g %g %g %g\n",
+                dbg(1, ("break_wires_at_pins(): hashing new wire %d: %g %g %g %g\n",
                     xctx->wires, xctx->wire[xctx->wires].x1, xctx->wire[xctx->wires].y1,
-                                 xctx->wire[xctx->wires].x2, xctx->wire[xctx->wires].y2);
+                                 xctx->wire[xctx->wires].x2, xctx->wire[xctx->wires].y2));
                 my_strdup(_ALLOC_ID_, &xctx->wire[xctx->wires].node, xctx->wire[i].node);
                 xctx->need_reb_sel_arr=1;
                 xctx->wires++;
@@ -604,12 +607,12 @@ void break_wires_at_pins(int remove)
                   xctx->inst[k].xx1, xctx->inst[k].yy1, xctx->inst[k].xx2, xctx->inst[k].yy2)) {
 
                 if(touches_inst_pin(xctx->wire[i].x2, xctx->wire[i].y2, k) || xctx->wire[i].end2 == 0) {
-                  dbg(1, "break_wires_at_pins(): wire %d needs to be deleted: %g %g %g %g\n",
-                          i, xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2);
+                  dbg(1, ("break_wires_at_pins(): wire %d needs to be deleted: %g %g %g %g\n",
+                          i, xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2));
                   /* mark for deletion only if no other nets attached */
                   xctx->wire[i].sel = SELECTED4; /* use a special flag to later delete these wires
                                                   * only and not other seleted wires */
-                  dbg(1, "break_wires_at_pins(): mark wire %d for deletion: end2=%d\n", i, xctx->wire[i].end2);
+                  dbg(1, ("break_wires_at_pins(): mark wire %d for deletion: end2=%d\n", i, xctx->wire[i].end2));
                 }
               }
             } /* if( (x0!=xctx->wire[i].x1 && x0!=xctx->wire[i].x2) || ... ) */
@@ -620,10 +623,10 @@ void break_wires_at_pins(int remove)
               int e2 = xctx->wire[i].end2;
               int inside = RECT_INSIDE(xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2,
                            xctx->inst[k].xx1, xctx->inst[k].yy1, xctx->inst[k].xx2, xctx->inst[k].yy2);
-              dbg(1, "i=%d, t1=%d, t2=%d, e1=%d, e2=%d\n", i, t1, t2, e1, e2);
+              dbg(1, ("i=%d, t1=%d, t2=%d, e1=%d, e2=%d\n", i, t1, t2, e1, e2));
               if(inside && ( (t1 && t2) || (t1 && e2 == 0) || (t2 && e1 == 0) )) {
                 xctx->wire[i].sel = SELECTED4;
-                if(!changed) { xctx->push_undo(); changed=1;}
+                if(!changed) { xctx->push_undo(0); changed=1;}
               }
             }
           } /* if( touch(xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2, x0,y0) ) */
@@ -666,7 +669,7 @@ void break_wires_at_pins(int remove)
           if( (x0!=xctx->wire[i].x1 && x0!=xctx->wire[i].x2) ||
               (y0!=xctx->wire[i].y1 && y0!=xctx->wire[i].y2) ) {
             /* printf("touch in mid point: %d\n", l+1); */
-            if(!changed) { xctx->push_undo(); changed=1;}
+            if(!changed) { xctx->push_undo(0); changed=1;}
             check_wire_storage();
             xctx->wire[xctx->wires].x1=xctx->wire[i].x1;
             xctx->wire[xctx->wires].y1=xctx->wire[i].y1;

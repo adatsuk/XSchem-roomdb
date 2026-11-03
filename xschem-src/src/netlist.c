@@ -50,7 +50,7 @@ static void instinsert(int n, int x, int y)
   newptr->next=ptr;
   newptr->n=n;
   xctx->inst_spatial_table[x][y]=newptr;
-  dbg(2, "instinsert(): inserting object %d at %d,%d\n",n,x,y);
+  dbg(2, ("instinsert(): inserting object %d at %d,%d\n",n,x,y));
 }
 
 static Instentry *delinstentry(Instentry *t)
@@ -72,7 +72,7 @@ void del_inst_table(void)
     for(j=0;j<NBOXES; ++j)
       xctx->inst_spatial_table[i][j] = delinstentry(xctx->inst_spatial_table[i][j]);
   xctx->prep_hash_inst=0;
-  dbg(1, "del_inst_table(): cleared object hash table\n");
+  dbg(1, ("del_inst_table(): cleared object hash table\n"));
 }
 
 /* what:
@@ -155,7 +155,7 @@ void del_object_table(void)
       xctx->object_spatial_table[i][j] = delobjectentry(xctx->object_spatial_table[i][j]);
   xctx->prep_hash_object=0;
   xctx->n_hash_objects = 0;
-  dbg(1, "del_object_table(): cleared object hash table\n");
+  dbg(1, ("del_object_table(): cleared object hash table\n"));
 }
 
 
@@ -188,7 +188,7 @@ static void objectinsert(int type, int n, int c, int x, int y)
   newptr->n=n;
   newptr->c=c;
   xctx->object_spatial_table[x][y]=newptr;
-  dbg(2, "objectnsert(): inserting object %d %d %d at %d,%d\n",type, n, c, x, y);
+  dbg(2, ("objectnsert(): inserting object %d %d %d at %d,%d\n",type, n, c, x, y));
 }
 
 /* what:
@@ -352,7 +352,7 @@ static void instpininsert(int n,int pin, double x0, double y0, int x, int y)
  newptr->y0=y0;
  newptr->pin=pin;
  xctx->instpin_spatial_table[x][y]=newptr;
- dbg(2, "instpininsert(): inserting inst %d at %d,%d\n",n,x,y);
+ dbg(2, ("instpininsert(): inserting inst %d at %d,%d\n",n,x,y));
 }
 
 
@@ -405,7 +405,7 @@ static void wireinsert(int n, int x, int y)
   newptr->next=ptr;
   newptr->n=n;
   xctx->wire_spatial_table[x][y]=newptr;
-  dbg(2, "wireinsert(): inserting wire %d at %d,%d\n",n,x,y);
+  dbg(2, ("wireinsert(): inserting wire %d at %d,%d\n",n,x,y));
 }
 
 static Wireentry *delwireentry(Wireentry *t)
@@ -511,7 +511,7 @@ void hash_wire(int what, int n, int incremental)
   Wireentry *wptr;
   xWire * const wire = xctx->wire;
   if(skip_wire(n)) return;
-  dbg(1, "hash_wire(): what=%d n=%d incremental=%d\n",  what, n, incremental);
+  dbg(1, ("hash_wire(): what=%d n=%d incremental=%d\n",  what, n, incremental));
   wire[n].end1 = wire[n].end2=-1;
   x1=wire[n].x1;
   x2=wire[n].x2;
@@ -578,16 +578,16 @@ int check_lib(int what, const char *s)
  if(what & 2) tcleval("llength $noprint_libs");
  if(what & 4) tcleval("llength $nolist_libs");
  range = atoi(tclresult());
- dbg(1, "check_lib(): s=%s, range=%d\n", s, range);
+ dbg(1, ("check_lib(): s=%s, range=%d\n", s, range));
 
  for(i=0;i<range; ++i){
   if(what & 1 ) my_snprintf(str, S(str), "lindex $xschem_libs %d",i);
   if(what & 2 ) my_snprintf(str, S(str), "lindex $noprint_libs %d",i);
   if(what & 4 ) my_snprintf(str, S(str), "lindex $nolist_libs %d",i);
   tcleval(str);
-  dbg(1, "check_lib(): %s -> %s\n", str, tclresult());
+  dbg(1, ("check_lib(): %s -> %s\n", str, tclresult()));
   my_snprintf(str, S(str), "regexp {%s} {%s}", tclresult(), s);
-  dbg(1, "check_lib(): str=%s\n", str);
+  dbg(1, ("check_lib(): str=%s\n", str));
   tcleval(str);
   if( tclresult()[0] == '1') found=1;
  }
@@ -604,17 +604,14 @@ void netlist_options(int i)
     bus_char[1] = str[1];
     /* tclsetvar("bus_replacement_char", str); */
   }
-  /* fprintf(errfp, "netlist_options(): bus_char=%s\n", str); */
 
   str = get_tok_value(xctx->inst[i].prop_ptr, "lvs_ignore", 0);
   if(str[0]) {
-    /* fprintf(errfp, "netlist_options(): prop_ptr=%s\n", xctx->inst[i].prop_ptr); */
     if(!strboolcmp(str, "true")) tclsetintvar("lvs_ignore", 1);
     else tclsetintvar("lvs_ignore", 0);
   }
   str = get_tok_value(xctx->inst[i].prop_ptr, "lvs_netlist", 0);
   if(str[0]) {
-    /* fprintf(errfp, "netlist_options(): prop_ptr=%s\n", xctx->inst[i].prop_ptr); */
     if(!strboolcmp(str, "true")) {
       tclsetintvar("lvs_netlist", 1);
       my_strdup(_ALLOC_ID_, &xctx->format, "lvs_format");
@@ -627,14 +624,12 @@ void netlist_options(int i)
 
   str = get_tok_value(xctx->inst[i].prop_ptr, "top_is_subckt", 0);
   if(str[0]) {
-    /* fprintf(errfp, "netlist_options(): prop_ptr=%s\n", xctx->inst[i].prop_ptr); */
     if(!strboolcmp(str, "true")) tclsetintvar("top_is_subckt", 1);
     else tclsetintvar("top_is_subckt", 0);
   }
 
   str = get_tok_value(xctx->inst[i].prop_ptr, "spiceprefix", 0);
   if(str[0]) {
-    /* fprintf(errfp, "netlist_options(): prop_ptr=%s\n", xctx->inst[i].prop_ptr); */
     if(!strboolcmp(str, "false")) tclsetvar("spiceprefix", "0");
     else tclsetvar("spiceprefix", "1");
   }
@@ -645,19 +640,19 @@ void netlist_options(int i)
   }
 }
 
-void set_tcl_netlist_type(void)
+void set_tcl_netlist_type(Xschem_ctx *ctx)
 {
-    if(xctx->netlist_type == CAD_SPICE_NETLIST) {
+    if(ctx->netlist_type == CAD_SPICE_NETLIST) {
       tclsetvar("netlist_type", "spice");
-    }  else if(xctx->netlist_type == CAD_VERILOG_NETLIST) {
+    }  else if(ctx->netlist_type == CAD_VERILOG_NETLIST) {
       tclsetvar("netlist_type", "verilog");
-    } else if(xctx->netlist_type == CAD_VHDL_NETLIST) {
+    } else if(ctx->netlist_type == CAD_VHDL_NETLIST) {
       tclsetvar("netlist_type", "vhdl");
-    } else if(xctx->netlist_type == CAD_SPECTRE_NETLIST) {
+    } else if(ctx->netlist_type == CAD_SPECTRE_NETLIST) {
       tclsetvar("netlist_type", "spectre");
-    } else if(xctx->netlist_type == CAD_TEDAX_NETLIST) {
+    } else if(ctx->netlist_type == CAD_TEDAX_NETLIST) {
       tclsetvar("netlist_type", "tedax");
-    } else if(xctx->netlist_type == CAD_SYMBOL_ATTRS) {
+    } else if(ctx->netlist_type == CAD_SYMBOL_ATTRS) {
       tclsetvar("netlist_type", "symbol");
     } else {
       tclsetvar("netlist_type", "unknown");
@@ -673,14 +668,14 @@ static void print_wires(void)
  for(i=0;i<NBOXES; ++i) {
    for(j=0;j<NBOXES; ++j)
    {
-    dbg(1, "print_wires(): %4d%4d :\n",i,j);
+    dbg(1, ("print_wires(): %4d%4d :\n",i,j));
     ptr=xctx->wire_spatial_table[i][j];
     while(ptr)
     {
-     dbg(1, "print_wires(): %6d\n", ptr->n);
+     dbg(1, ("print_wires(): %6d\n", ptr->n));
      ptr=ptr->next;
     }
-    dbg(1, "print_wires(): \n");
+    dbg(1, ("print_wires(): \n"));
    }
  }
  ptr=xctx->wire_spatial_table[0][1];
@@ -707,9 +702,10 @@ static void print_wires(void)
  */
 int record_global_node(int what, FILE *fp, const char *node)
 {
- int i;
-
- if( what == 1 || what == 3 || what == 4) {
+  
+ if(what == 3) {
+  
+  int i;
     if(!node) return 0;
     if(!strcmp(node, "0")) return 2;
     for(i = 0;i < xctx->max_globals; ++i) {
@@ -718,18 +714,45 @@ int record_global_node(int what, FILE *fp, const char *node)
          else return 1; /* node is a global */
       }
     }
-    if(what == 3) return 0; /* node is not a global */
-    if(xctx->max_globals >= xctx->size_globals) {
-       xctx->size_globals+=CADCHUNKALLOC;
-       my_realloc(_ALLOC_ID_, &xctx->globals, xctx->size_globals*sizeof(char *) );
-       my_realloc(_ALLOC_ID_, &xctx->global_type, xctx->size_globals*sizeof(int) );
+    return 0;
+ }
+ else if( what == 1 || what == 4) { /* insert global node */
+    char *node_exp = NULL;
+    char *n;
+    int i, mult;
+
+    if(!node) return 0;
+    /* if a bus is given expand into single bits */
+    my_strdup2(_ALLOC_ID_, &node_exp, expandlabel(node, &mult));
+    for(i = 1; i <= mult; i++) {
+      int j;
+      int found = 0;
+
+      n = find_nth(node_exp, ",", "", 0, i);
+      if(!strcmp(n, "0")) continue;
+      for(j = 0; j < xctx->max_globals; ++j) {
+        if( !strcmp(n, xctx->globals[j] )) {
+          found = 1;
+          break;
+        }
+      }
+      if(!found) {
+        dbg(1, ("record_global_node(): inserting %s\n", n));
+        if(xctx->max_globals >= xctx->size_globals) {
+           xctx->size_globals+=CADCHUNKALLOC;
+           my_realloc(_ALLOC_ID_, &xctx->globals, xctx->size_globals*sizeof(char *) );
+           my_realloc(_ALLOC_ID_, &xctx->global_type, xctx->size_globals*sizeof(int) );
+        }
+        xctx->globals[xctx->max_globals] = NULL;
+        if(what == 4) xctx->global_type[xctx->max_globals] = 1; /* ground and global (for Spectre) */
+        else xctx->global_type[xctx->max_globals] = 0; /* global */
+        my_strdup(_ALLOC_ID_, &xctx->globals[xctx->max_globals], n);
+        xctx->max_globals++;
+      }
     }
-    xctx->globals[xctx->max_globals] = NULL;
-    if(what == 4) xctx->global_type[xctx->max_globals] = 1; /* ground and global (for Spectre) */
-    else xctx->global_type[xctx->max_globals] = 0; /* global */
-    my_strdup(_ALLOC_ID_, &xctx->globals[xctx->max_globals], node);
-    xctx->max_globals++;
+    my_free(_ALLOC_ID_, &node_exp);
  } else if(what == 0) {
+    int i;
     for(i = 0;i < xctx->max_globals; ++i) {
        if(xctx->netlist_type == CAD_SPICE_NETLIST) fprintf(fp, ".GLOBAL %s\n", xctx->globals[i]);
        if(xctx->netlist_type == CAD_SPECTRE_NETLIST) {
@@ -739,6 +762,7 @@ int record_global_node(int what, FILE *fp, const char *node)
        if(xctx->netlist_type == CAD_TEDAX_NETLIST) fprintf(fp, "__GLOBAL__ %s\n", xctx->globals[i]);
     }
  } else if(what == 2) {
+    int i;
     for(i=0;i<xctx->max_globals; ++i) {
        my_free(_ALLOC_ID_, &xctx->globals[i]);
     }
@@ -778,7 +802,7 @@ void get_inst_pin_coord(int i, int j, double *x, double *y)
 /* what==3 -> get node multiplicity */
 int get_unnamed_node(int what, int mult,int node)
 {
-  dbg(2, "get_unnamed_node(): what=%d mult=%d node=%d\n", what, mult, node);
+  dbg(2, ("get_unnamed_node(): what=%d mult=%d node=%d\n", what, mult, node));
   if(what==0) { /* initialize unnamed node data structures */
     xctx->new_node=0;
     my_free(_ALLOC_ID_, &xctx->node_mult);
@@ -807,7 +831,7 @@ int get_unnamed_node(int what, int mult,int node)
     return 0;
   }
   else { /* what=3 , return node multiplicity */
-    dbg(2, "get_unnamed_node(): returning mult=%d\n", xctx->node_mult[node]);
+    dbg(2, ("get_unnamed_node(): returning mult=%d\n", xctx->node_mult[node]));
     return xctx->node_mult[node];
   }
 }
@@ -828,7 +852,7 @@ static void name_generics()
   int const instances = xctx->instances;
 
   /* name generic pins from attached labels */
-  dbg(2, "name_generics(): naming generics from attached labels\n");
+  dbg(2, ("name_generics(): naming generics from attached labels\n"));
   if(for_netlist) for (i=0;i<instances; ++i) { /* ... assign node fields on all (non label) instances */
     if(skip_instance(i, 0, netlist_lvs_ignore)) continue;
     my_strdup(_ALLOC_ID_, &type,(inst[i].ptr+ xctx->sym)->type);
@@ -856,7 +880,7 @@ static void name_generics()
             if((iptr->x0==x0) && (iptr->y0==y0)) {
               if((inst[n].ptr+ xctx->sym)->type && inst[n].node[p] != NULL &&
                  !strcmp((inst[n].ptr+ xctx->sym)->type, "label")) {
-                dbg(2, "name_generics(): naming generic %s\n", inst[n].node[p]);
+                dbg(2, ("name_generics(): naming generic %s\n", inst[n].node[p]));
                 my_strdup(_ALLOC_ID_,  &inst[i].node[j], get_tok_value(inst[n].prop_ptr,"value",0) );
                 if(!for_netlist) {
                   my_strdup(_ALLOC_ID_, &sig_type,"");
@@ -889,7 +913,7 @@ static int signal_short( const char *tag, const char *n1, const char *n2)
  {
    err |= 1;
    my_snprintf(str, S(str), "Error: %s shorted: %s - %s", tag, n1, n2);
-   dbg(1, "signal_short(): signal_short: shorted: %s - %s", n1, n2);
+   dbg(1, ("signal_short(): signal_short: shorted: %s - %s", n1, n2));
    statusmsg(str,2);
    if(!xctx->netlist_count) {
       bus_hilight_hash_lookup(n1, xctx->hilight_color, XINSERT);
@@ -947,16 +971,21 @@ static void set_lab_or_pin_inst_attr(int i, int j, const char *node)
 static void set_inst_node(int i, int j, const char *node)
 {
   xInstance * const inst = xctx->inst;
-  int inst_mult;
   xRect *rect = (inst[i].ptr + xctx->sym)->rect[PINLAYER];
-  int skip;
-
+  int skip, k;
+  char *tr_node = NULL;
   if(!node || !node[0]) return;
   if(!inst[i].node) return;
   if(!inst[i].instname) return;
-  dbg(1, "set_inst_node(): inst %s pin %d <-- %s\n", inst[i].instname, j, node);
-  expandlabel(inst[i].instname, &inst_mult);
-  my_strdup(_ALLOC_ID_,  &inst[i].node[j], node);
+  dbg(1, ("set_inst_node(): inst %s pin %d <-- %s\n", inst[i].instname, j, node));
+
+  my_strdup2(_ALLOC_ID_, &tr_node, node);
+  for(k = xctx->currsch - 1; k >= 0; k--) {
+    if(!strpbrk(tr_node, "@%")) break;
+    translate3(tr_node, i, 1, xctx->hier_attr[k].prop_ptr, NULL, NULL, NULL, &tr_node);
+  }
+  my_strdup(_ALLOC_ID_,  &inst[i].node[j], eval_expr(tr_node));
+  my_free(_ALLOC_ID_, &tr_node);
   skip = skip_instance(i, 1, netlist_lvs_ignore);
   if(!for_netlist || skip) {
     bus_node_hash_lookup(inst[i].node[j],"", XINSERT, 0,"","","","");
@@ -969,6 +998,17 @@ static void set_inst_node(int i, int j, const char *node)
 
   if(node[0] == '#') { /* update multilicity of unnamed node */
     int pin_mult;
+    int inst_mult;
+    char *tr_instname = NULL;
+
+    my_strdup2(_ALLOC_ID_, &tr_instname, inst[i].instname);
+    for(k = xctx->currsch - 1; k >= 0; k--) {
+      if(!strpbrk(tr_instname, "@%")) break;
+      translate3(tr_instname, -1, 1, xctx->hier_attr[k].prop_ptr, NULL, NULL, NULL, &tr_instname);
+    }
+    expandlabel(eval_expr(tr_instname), &inst_mult);
+    my_free(_ALLOC_ID_, &tr_instname);
+
     expandlabel(get_tok_value(rect[j].prop_ptr, "name", 0), &pin_mult);
     get_unnamed_node(2, pin_mult * inst_mult, atoi((inst[i].node[j]) + 4));
   }
@@ -992,8 +1032,8 @@ static int name_attached_inst_to_net(int k, int sqx, int sqy)
     if(!inst[n].node) continue;
     if(touch(wire[k].x1, wire[k].y1, wire[k].x2, wire[k].y2, x0, y0)) {
       if(!inst[n].node[p]) {
-        dbg(1, "name_attached_inst_to_net(): inst %s, pin %d <-- %s\n",
-              inst[n].instname, p, wire[k].node ? wire[k].node : "<NULL>");
+        dbg(1, ("name_attached_inst_to_net(): inst %s, pin %d <-- %s\n",
+              inst[n].instname, p, wire[k].node ? wire[k].node : "<NULL>"));
         set_inst_node(n, p, wire[k].node);
         err |= instcheck(n, p);
       } else {
@@ -1012,7 +1052,7 @@ static int wirecheck(int k)    /* recursive routine */
   Wireentry *wptr;
   xWire * const wire = xctx->wire;
   if(skip_wire(k)) return err;
-  dbg(1, "wirecheck: %d\n", k);
+  dbg(1, ("wirecheck: %d\n", k));
   x1 = wire[k].x1; y1 = wire[k].y1;
   x2 = wire[k].x2; y2 = wire[k].y2;
   /* ordered bbox */
@@ -1134,10 +1174,10 @@ static int skip_wire2(int i, int lvs_ignore, int mask)
 { 
   int skip = 0;
   if(xctx->wire[i].flags & mask) {
-    dbg(1, "i=%d flags=%d, mask=%d\n", i, xctx->wire[i].flags, mask);
+    dbg(1, ("i=%d flags=%d, mask=%d\n", i, xctx->wire[i].flags, mask));
     skip = 1;
   } else if(lvs_ignore && (xctx->wire[i].flags & LVS_IGNORE)) {
-    dbg(1, "lvs_ignore is set, i=%d flags=%d\n", i, xctx->wire[i].flags);
+    dbg(1, ("lvs_ignore is set, i=%d flags=%d\n", i, xctx->wire[i].flags));
     skip = 1;
   }
   return skip;
@@ -1158,7 +1198,7 @@ int skip_wire(int i)
       skip =  skip_wire2(i, netlist_lvs_ignore, TEDAX_IGNORE);
   else skip = 0;
 
-  dbg(1, "skip_wire(): wire %d skip=%d\n", i, skip);
+  dbg(1, ("skip_wire(): wire %d skip=%d\n", i, skip));
   return skip;
 }   
 
@@ -1188,7 +1228,7 @@ int skip_instance(int i, int skip_short, int lvs_ignore)
       skip =  skip_instance2(i, lvs_ignore, (skip_short ? TEDAX_SHORT : 0) | TEDAX_IGNORE);
   else skip = 0;
 
-  dbg(1, "skip_instance(): instance %d skip=%d\n", i, skip);
+  dbg(1, ("skip_instance(): instance %d skip=%d\n", i, skip));
   return skip;
 }
 
@@ -1219,12 +1259,12 @@ static int find_pass_through_symbols(int what, int ninst)
       for(j = 0; j < xctx->sym[k].rects[PINLAYER]; ++j) {
         const char *pin_name = get_tok_value(xctx->sym[k].rect[PINLAYER][j].prop_ptr, "name", 0);
         if(int_hash_lookup(&table, pin_name, j, XINSERT_NOREPLACE)) {
-          dbg(1, "   pass thru symbol found\n");
+          dbg(1, ("   pass thru symbol found\n"));
           pt_symbol[k] = 1;
         }
       }
       int_hash_free(&table);
-      if(pt_symbol[k]) dbg(1, "duplicated pins: %s\n", xctx->sym[k].name);
+      if(pt_symbol[k]) dbg(1, ("duplicated pins: %s\n", xctx->sym[k].name));
     }
     my_free(_ALLOC_ID_, &symtable);
   } else if(what ==1) { /* query */
@@ -1320,7 +1360,7 @@ static int instcheck(int n, int p)
     } else {
       if(for_netlist>0) err |= signal_short("Bus tap", inst[n].node[p], inst[n].node[0]);
     }
-    dbg(1, "instcheck: bus tap node: p=%d, %s, tap=%s\n", p, inst[n].node[p], inst[n].node[0]);
+    dbg(1, ("instcheck: bus tap node: p=%d, %s, tap=%s\n", p, inst[n].node[p], inst[n].node[0]));
     my_free(_ALLOC_ID_, &node_base_name);
   }
 
@@ -1340,8 +1380,8 @@ static int instcheck(int n, int p)
         other_pin = get_tok_value(xctx->sym[k].rect[PINLAYER][j].prop_ptr, "name", 0);
       }
       if(!strcmp(other_pin, pin_name)) {
-        dbg(1, "instcheck: inst %s pin %s(%d) <--> pin %s(%d)\n", inst[n].instname, pin_name, p, other_pin, j);
-        dbg(1, "instcheck: node: %s\n", inst[n].node[p]);
+        dbg(1, ("instcheck: inst %s pin %s(%d) <--> pin %s(%d)\n", inst[n].instname, pin_name, p, other_pin, j));
+        dbg(1, ("instcheck: node: %s\n", inst[n].node[p]));
         if(!inst[n].node[j]) {
           set_inst_node(n, j, inst[n].node[p]);
           get_inst_pin_coord(n, j, &x0, &y0);
@@ -1380,7 +1420,7 @@ static int name_nodes_of_pins_labels_and_propagate()
   static int startlevel = 0; /* safe to keep even with multiple schematic windows, netlist is not interruptable */
 
   if(xctx->netlist_count == 0 ) startlevel = xctx->currsch;
-  dbg(2, "name_nodes_of_pins_labels_and_propagate(): naming pins from attrs\n");
+  dbg(2, ("name_nodes_of_pins_labels_and_propagate(): naming pins from attrs\n"));
   /* print_erc is 1 the first time prepare_netlist_structs() is called on top level while
    * doing the netlist, when netlist of sub blocks is completed and toplevel is reloaded
    * a second prepare_netlist_structs() is called to name unnamed nets, in this second call
@@ -1418,6 +1458,8 @@ static int name_nodes_of_pins_labels_and_propagate()
       xctx->hilight_nets=1;
     }
     if(type && inst[i].node && IS_LABEL_OR_PIN(type) ) { /* instance must have a pin! */
+      char *tr_lab = NULL;
+      int k;
       port=0;
       my_strdup2(_ALLOC_ID_, &dir, "");
       if(strcmp(type,"label")) {  /* instance is a port (not a label) */
@@ -1443,16 +1485,20 @@ static int name_nodes_of_pins_labels_and_propagate()
         my_strdup(_ALLOC_ID_, &class,get_tok_value(inst[i].prop_ptr,"class",0));
       }
 
-
-      my_strdup(_ALLOC_ID_, &inst[i].node[0], inst[i].lab);
-
+      my_strdup2(_ALLOC_ID_, &tr_lab, inst[i].lab);
+      for(k = xctx->currsch - 1; k >= 0; k--) {
+        if(!strpbrk(tr_lab, "@%")) break;
+        translate3(tr_lab, i, 1, xctx->hier_attr[k].prop_ptr, NULL, NULL, NULL, &tr_lab);
+      }
+      my_strdup(_ALLOC_ID_, &inst[i].node[0], eval_expr(tr_lab));
+      my_free(_ALLOC_ID_, &tr_lab);
 
       /* do not assign node if pin/label has no 'lab' attribute */
       #if 0
       if(!(inst[i].node[0])) {
         my_strdup(_ALLOC_ID_, &inst[i].node[0], get_tok_value(xctx->sym[inst[i].ptr].templ, "lab",0));
-        dbg(1, "name_nodes_of_pins_labels_and_propagate(): no lab attr on instance, pick from symbol: %s\n",
-                inst[i].node[0]);
+        dbg(1, ("name_nodes_of_pins_labels_and_propagate(): no lab attr on instance, pick from symbol: %s\n",
+                inst[i].node[0]));
       }
       #endif
 
@@ -1460,11 +1506,11 @@ static int name_nodes_of_pins_labels_and_propagate()
         /* handle global nodes (global=1 set as symbol property) 28032003 */
         if(!strcmp(type,"label") && global_node) {
           if( !strcmp(global_node, "ground")) {
-            dbg(1, "name_nodes_of_pins_labels_and_propagate(): ground node: %s\n",inst[i].node[0]);
+            dbg(1, ("name_nodes_of_pins_labels_and_propagate(): ground node: %s\n",inst[i].node[0]));
             record_global_node(4,NULL, inst[i].node[0]);
           }
           else if( !strboolcmp(global_node, "true")) {
-            dbg(1, "name_nodes_of_pins_labels_and_propagate(): global node: %s\n",inst[i].node[0]);
+            dbg(1, ("name_nodes_of_pins_labels_and_propagate(): global node: %s\n",inst[i].node[0]));
             record_global_node(1,NULL, inst[i].node[0]);
           }
         }
@@ -1513,7 +1559,7 @@ static int name_unlabeled_nets()
   int err = 0;
   int i;
   /* name nets that do not touch ipin opin alias instances */
-  dbg(2, "name_unlabeled_nets(): naming nets that dont touch labels\n");
+  dbg(2, ("name_unlabeled_nets(): naming nets that dont touch labels\n"));
   for (i = 0; i < xctx->wires; ++i)
   {
     if(skip_wire(i)) continue;
@@ -1533,7 +1579,7 @@ static int set_unnamed_inst(int i, int j)
   int sqx, sqy;
   double x0, y0;
   my_snprintf(tmp_str, S(tmp_str), "#net%d", get_unnamed_node(1,0,0));
-  dbg(1, "set_unnamed_inst(): inst %s pin %d, net %s\n", inst[i].instname, j, tmp_str);
+  dbg(1, ("set_unnamed_inst(): inst %s pin %d, net %s\n", inst[i].instname, j, tmp_str));
   set_inst_node(i, j, tmp_str);
   get_inst_pin_coord(i, j, &x0, &y0);
   get_square(x0, y0, &sqx, &sqy);
@@ -1549,7 +1595,7 @@ static int name_unlabeled_instances()
   int const instances = xctx->instances;
   int rects;
 
-  dbg(2, "name_unlabeled_instances(): naming nets that dont touch labels\n");
+  dbg(2, ("name_unlabeled_instances(): naming nets that dont touch labels\n"));
   for (i = 0; i < instances; ++i)
   {
     if(!inst[i].node) continue;
@@ -1575,7 +1621,7 @@ static int reset_node_data_and_rehash()
   int const instances = xctx->instances;
 
   /* reset wire & inst node labels */
-  dbg(2, "reset_node_data_and_rehash(): rehashing wires and instance pins in spatial hash table\n");
+  dbg(2, ("reset_node_data_and_rehash(): rehashing wires and instance pins in spatial hash table\n"));
   hash_wires();
   for (i=0;i<instances; ++i)
   {
@@ -1635,14 +1681,14 @@ void auto_set_wire_bus(int start, int end)
     if(!xctx->wire[i].node) continue;
     if(!regexec(&re, xctx->wire[i].node, 0 , NULL, 0) ) bus = 1;
     if( (oldbus == 0.0 && bus == 1) || (oldbus == -1.0 && bus == 0) ) {
-      dbg(1, "auto_set_wire_bus(): i=%d, oldbus=%g bus=%d\n", i, oldbus, bus);
+      dbg(1, ("auto_set_wire_bus(): i=%d, oldbus=%g bus=%d\n", i, oldbus, bus));
       set_modify(1);
-      dbg(1, "auto_set_wire_bus():  wire[%d].prop_ptr=%s\n", i, xctx->wire[i].prop_ptr);
+      dbg(1, ("auto_set_wire_bus():  wire[%d].prop_ptr=%s\n", i, xctx->wire[i].prop_ptr));
       my_strdup(_ALLOC_ID_, &xctx->wire[i].prop_ptr,
          subst_token(xctx->wire[i].prop_ptr, "bus", bus ? "1" : NULL));
       xctx->wire[i].bus = bus ? -1.0 : 0.0;
-      dbg(1, "auto_set_wire_bus():  wire[%d].bus=%g, lab=%s\n", i, xctx->wire[i].bus, xctx->wire[i].node);
-      dbg(1, "auto_set_wire_bus():  wire[%d].prop_ptr=%s\n", i, xctx->wire[i].prop_ptr);
+      dbg(1, ("auto_set_wire_bus():  wire[%d].bus=%g, lab=%s\n", i, xctx->wire[i].bus, xctx->wire[i].node));
+      dbg(1, ("auto_set_wire_bus():  wire[%d].prop_ptr=%s\n", i, xctx->wire[i].prop_ptr));
       if(xctx->wire[i].bus == -1.0) {
         if(skip_wire(i))
           drawline(GRIDLAYER, THICK, xctx->wire[i].x1,xctx->wire[i].y1,
@@ -1674,7 +1720,7 @@ int prepare_netlist_structs(int for_netl)
   if(for_netlist>0 && xctx->prep_net_structs) return 0;
   else if(!for_netlist && xctx->prep_hi_structs) return 0;
 
-  dbg(1, "prepare_netlist_structs(): extraction: %s\n", xctx->sch[xctx->currsch]);
+  dbg(1, ("prepare_netlist_structs(): extraction: %s\n", xctx->sch[xctx->currsch]));
 
   reset_caches(); /* update cached flags: necessary if some tcleval() is used for cached attrs */
 
@@ -1701,7 +1747,7 @@ int prepare_netlist_structs(int for_netl)
     xctx->prep_net_structs=1;
     xctx->prep_hi_structs=1;
   } else xctx->prep_hi_structs=1;
-  dbg(1, "prepare_netlist_structs(): returning\n");
+  dbg(1, ("prepare_netlist_structs(): returning\n"));
   /* avoid below call: it in turn calls prepare_netlist_structs(), too many side effects */
   /* propagate_hilights(1, 0, XINSERT_NOREPLACE);*/
   return err;
@@ -1725,7 +1771,7 @@ void delete_netlist_structs(void)
 {
  int i;
   /* erase node data structures */
-   dbg(1, "delete_netlist_structs(): begin erasing\n");
+   dbg(1, ("delete_netlist_structs(): begin erasing\n"));
   for(i=0;i<xctx->instances; ++i)
   {
    delete_inst_node(i);
@@ -1737,7 +1783,7 @@ void delete_netlist_structs(void)
   /* erase inst and wire topological hash tables */
   del_inst_pin_table();
   node_hash_free();
-  dbg(1, "delete_netlist_structs(): end erasing\n");
+  dbg(1, ("delete_netlist_structs(): end erasing\n"));
   xctx->prep_net_structs=0;
   xctx->prep_hi_structs=0;
 }
@@ -1753,12 +1799,12 @@ int warning_overlapped_symbols(int sel)
 
   int_hash_init(&table, HASHSIZE);
   for(i = 0; i < xctx->instances; ++i) {
-    dbg(1, "instance:%s: %s\n", xctx->inst[i].instname, xctx->inst[i].name);
+    dbg(1, ("instance:%s: %s\n", xctx->inst[i].instname, xctx->inst[i].name));
     my_snprintf(s, S(s), "%g %g %g %g",
        xctx->inst[i].xx1, xctx->inst[i].yy1, xctx->inst[i].xx2, xctx->inst[i].yy2);
 
-    dbg(1, "  bbox: %g %g %g %g\n", xctx->inst[i].xx1, xctx->inst[i].yy1, xctx->inst[i].xx2, xctx->inst[i].yy2);
-    dbg(1, "  s=%s\n", s);
+    dbg(1, ("  bbox: %g %g %g %g\n", xctx->inst[i].xx1, xctx->inst[i].yy1, xctx->inst[i].xx2, xctx->inst[i].yy2));
+    dbg(1, ("  s=%s\n", s));
     found =  int_hash_lookup(&table, s, i, XINSERT_NOREPLACE);
     if(found) {
       if(sel == 0) {
@@ -1780,28 +1826,128 @@ int warning_overlapped_symbols(int sel)
   return err;
 }
 
-/* all: -1: check all symbols, otherwise check only indicated symbol */
+/* check congruence between xtx->sym[nsym] and corresponsing schematic.
+ * schematic pins and pin types must be provided in arrays
+ * sch_pin_array and sch_pin_type_array */
+static int check_pins(int nsym, int sch_pin_cnt,
+                      char **sch_pin_array, char **sch_pin_type_array)
+{
+  int i, j, err = 0;
+  int sym_pin_cnt = xctx->sym[nsym].rects[PINLAYER];
+  for(i = 0; i < sch_pin_cnt; i++) {
+    char *sym_pin_dir = NULL;
+    char *sym_pin_name = NULL;
+    int pin_match = 0;
+    for(j=0; j < sym_pin_cnt; ++j) {
+      my_strdup(_ALLOC_ID_, &sym_pin_name,
+        get_tok_value(xctx->sym[nsym].rect[PINLAYER][j].prop_ptr, "name", 0));
+      my_strdup(_ALLOC_ID_, &sym_pin_dir,
+        get_tok_value(xctx->sym[nsym].rect[PINLAYER][j].prop_ptr, "dir", 0));
+
+      if( sym_pin_name && !strcmp(sym_pin_name, sch_pin_array[i])) {
+        if(!sym_pin_dir) {
+          char str[2048];
+          my_snprintf(str, S(str), "Error: Symbol %s: No direction given for pin %s",
+                    xctx->sym[nsym].name, sch_pin_array[i]);
+          statusmsg(str,2);
+          my_snprintf(str, S(str), "    %s <--> ???", sch_pin_type_array[i]);
+          statusmsg(str,2);
+          err |= 1;
+        }
+        else if(!(
+              ( !strcmp(sch_pin_type_array[i], "ipin") && !strcmp(sym_pin_dir, "in") ) ||
+              ( !strcmp(sch_pin_type_array[i], "opin") && !strcmp(sym_pin_dir, "out") ) ||
+              ( !strcmp(sch_pin_type_array[i], "iopin") && !strcmp(sym_pin_dir, "inout") )
+            )
+          ) {
+          char str[2048];
+          my_snprintf(str, S(str), "Error: Symbol %s: Unmatched subcircuit schematic pin direction: %s",
+                      xctx->sym[nsym].name, sch_pin_array[i]);
+          statusmsg(str,2);
+          my_snprintf(str, S(str), "    %s <--> %s", sch_pin_type_array[i], sym_pin_dir);
+          statusmsg(str,2);
+          err |= 1;
+          for(j = 0; j < xctx->instances; ++j) {
+            if(!xctx->x_strcmp(get_sym_name(j, 9999, 1, 0), xctx->sym[nsym].name)) {
+              xctx->inst[j].color = -PINLAYER;
+              xctx->hilight_nets=1;
+            }
+          }
+        }
+        pin_match++;
+        break;
+      }
+    }
+    if(sym_pin_name) my_free(_ALLOC_ID_, &sym_pin_name);
+    if(sym_pin_dir) my_free(_ALLOC_ID_, &sym_pin_dir);
+    if(!pin_match) {
+      char str[2048];
+      my_snprintf(str, S(str), "Error: Symbol %s: schematic pin: %s not in symbol",
+                  xctx->sym[nsym].name, sch_pin_array[i]);
+      statusmsg(str,2);
+      err |= 1;
+      for(j = 0; j < xctx->instances; ++j) {
+        dbg(1, ("inst.name=%s, sym.name=%s\n", tcl_hook2(xctx->inst[j].name), xctx->sym[nsym].name));
+        if(!xctx->x_strcmp(get_sym_name(j, 9999, 1, 0), xctx->sym[nsym].name)) {
+          xctx->inst[j].color = -PINLAYER;
+          xctx->hilight_nets=1;
+        }
+      }
+    }
+  } /* for(i = 0; i < sch_pin_cnt; i++) */
+
+  if(sch_pin_cnt != sym_pin_cnt) {
+    char str[2048];
+    my_snprintf(str, S(str), "Error: Symbol %s has %d pins, its schematic has %d pins",
+                xctx->sym[nsym].name, sym_pin_cnt, sch_pin_cnt);
+    statusmsg(str,2);
+    err |= 1;
+    for(j = 0; j < xctx->instances; ++j) {
+      if(!xctx->x_strcmp(get_sym_name(j, 9999, 1, 0), xctx->sym[nsym].name)) {
+        xctx->inst[j].color = -PINLAYER;
+        xctx->hilight_nets=1;
+      }
+    }
+  }
+  for(j=0; j < sym_pin_cnt; ++j) {
+    int k;
+    int pin_match = 0;
+    char *sym_pin_name = NULL;
+    my_strdup(_ALLOC_ID_, &sym_pin_name,
+       get_tok_value(xctx->sym[nsym].rect[PINLAYER][j].prop_ptr, "name", 0));
+    for(k=0; k<sch_pin_cnt; ++k) {
+      if(sym_pin_name && !strcmp(sch_pin_array[k], sym_pin_name)) {
+        pin_match++;
+        break;
+      }
+    }
+    if(!pin_match) {
+      char str[2048];
+      int k;
+      my_snprintf(str, S(str), "Error: Symbol %s: symbol pin: %s not in schematic",
+                  xctx->sym[nsym].name, sym_pin_name ? sym_pin_name : "<NULL>");
+      statusmsg(str,2);
+      err |= 1;
+      for(k = 0; k < xctx->instances; ++k) {
+        if(!xctx->x_strcmp(get_sym_name(k, 9999, 1, 0), xctx->sym[nsym].name)) {
+          xctx->inst[k].color = -PINLAYER;
+          xctx->hilight_nets=1;
+        }
+      }
+    }
+    my_free(_ALLOC_ID_, &sym_pin_name);
+  }
+  return err;
+}
+
+/* all: -1: check all symbols, otherwise check only indicated symbol
+ * if invoked with non negatve all parameter, caller should load symbol if needed
+ * and remove (if needed) afterwards
+ */
 int sym_vs_sch_pins(int all)
 {
   int err = 0;
-  char **lab_array =NULL;
-  int lab_array_size = 0;
-  int i, j, k, symbol, pin_cnt=0, pin_match, mult;
-  struct stat buf;
-  char name[PATH_MAX];
-  char *type = NULL;
-  char *tmp = NULL;
-  char *lab=NULL;
-  char *pin_name=NULL;
-  char *pin_dir=NULL;
-  double tmpd;
-  FILE *fd;
-  int tmpi;
-  short tmps;
-  int endfile;
-  char tag[1];
-  char filename[PATH_MAX];
-  char f_version[100];
+  int i;
   int start = 0;
   int end = xctx->symbols;
   int n_syms = xctx->symbols;
@@ -1811,272 +1957,268 @@ int sym_vs_sch_pins(int all)
   }
   for(i = start; i < end; ++i)
   {
+    int sym_pin_cnt = xctx->sym[i].rects[PINLAYER];
+    int undo_found = 0;
+    FILE *fd = NULL;
+    pid_t pid;
     if( xctx->sym[i].type && !strcmp(xctx->sym[i].type,"subcircuit")) {
-      int rects = xctx->sym[i].rects[PINLAYER];
+      char **sch_pin_array = NULL, **sch_pin_type_array = NULL;
+      int sch_pin_array_size = 0, sch_pin_cnt = 0;
+      undo_save *memory_undo_ptr = NULL;
+      struct stat buf;
+      char filename[PATH_MAX];
+      int j;
       /* Determine if symbol has pass-through pins (pins with identical name)
        * if any is found do not check with schematic */
       Int_hashtable pin_table = {NULL, 0};
       int p;
       int unique_pins = 0;
-      int_hash_init(&pin_table, HASHSIZE);
-      for(p = 0; p < rects; p++) {
+
+      int_hash_init(&pin_table, 367);
+      for(p = 0; p < sym_pin_cnt; p++) {
         const char *pname = get_tok_value(xctx->sym[i].rect[PINLAYER][p].prop_ptr, "name", 0);
         if(!int_hash_lookup(&pin_table, pname, i, XINSERT_NOREPLACE)) {
           unique_pins++;
         }
       }
-      dbg(1, "%s: rects=%d, unique_pins=%d\n", xctx->sym[i].name, rects, unique_pins);
+      dbg(1, ("%s: sym_pin_cnt=%d, unique_pins=%d\n", xctx->sym[i].name, sym_pin_cnt, unique_pins));
+
       int_hash_free(&pin_table);
       /* pass through symbols, duplicated pins: do not check with schematic */
-      if(rects > unique_pins) continue;
+      if(sym_pin_cnt > unique_pins) {
+        dbg(1, ("sym_vs_sch_pins(): Warning: %s has pass-through pins: do not check with schematic\n",
+                xctx->sym[i].name)); 
+        continue;
+      }
       get_sch_from_sym(filename, xctx->sym + i, -1, 0);
-      if(!stat(filename, &buf) && (fd = my_fopen(filename, fopen_read_mode))) {
-        pin_cnt = 0;
-        endfile = 0;
-        f_version[0] = '\0';
-        while(!endfile) {
-          if(fscanf(fd," %c",tag)==EOF) break;
-          switch(tag[0]) {
-            case 'v':
-             load_ascii_string(&tmp, fd);
-             my_snprintf(f_version, S(f_version), "%s",
-                         get_tok_value(tmp, "file_version", 0));
-            break;
 
-            case 'E':
-            case 'S':
-            case 'V':
-            case 'K':
-            case 'G':
-              load_ascii_string(&tmp, fd);
+      /* is there a copy of schematic in undo buffers? */
+      if(tclgetboolvar("preserve_undo")) { 
+        char *undo_dirname = NULL;
+        int undo_found = 0;
+        undo_found = save_undo_table(rel_sym_path(filename), &undo_dirname, XLOOKUP);
+        if(undo_found) dbg(1, ("sym_vs_sch_pins(): Warning: %s in undo buffer\n", rel_sym_path(filename)));
+        if(xctx->undo_type == 0 && undo_found) {
+          my_mstrcat(_ALLOC_ID_, &undo_dirname, "/undo0", NULL);
+          if(stat(undo_dirname, &buf)) {
+            /* entry found in save_undo_table, but file not existing */
+            undo_found = 0;
+          } else {
+            fd = open_read_undo_file(undo_dirname, &pid);
+          }
+        } else if(xctx->undo_type == 1 && undo_found) {
+          save_undo_table(rel_sym_path(filename), &memory_undo_ptr, XGET_SAVE_UNDO_PTR);
+          if(!memory_undo_ptr->modified) {
+            memory_undo_ptr = NULL; /* read from file */
+          }
+        }  
+      }
+
+      if(memory_undo_ptr) { /* get schematic pin list from memory undo slot */
+        int j;
+        int instances = memory_undo_ptr->uslot[0].instances;
+        xInstance *inst = memory_undo_ptr->uslot[0].iptr;
+        xSymbol *sym = memory_undo_ptr->uslot[0].symptr;
+        char *sch_pin_type = NULL;
+        /*
+         * need to assign sch_pin_array, sch_pin_type_array, sch_pin_array_size, sch_pin_cnt,
+         * reading sch data from memory_undo_ptr->uslot[0]
+         * then call: err |= check_pins(i, sch_pin_cnt, sch_pin_array, sch_pin_type_array);
+         */
+        for(j = 0; j < instances; j++) {
+          dbg(1, ("inst %d: %s ( %s)\n", j, inst[j].instname, inst[j].name));
+          dbg(1, ("  sym type: %s\n", sym[inst[j].ptr].type));
+          my_strdup(_ALLOC_ID_, &sch_pin_type, sym[inst[j].ptr].type);
+          if(sch_pin_type && IS_PIN(sch_pin_type)) {
+            char *sch_pin_name = NULL;
+            my_strdup(_ALLOC_ID_, &sch_pin_name, inst[j].lab);
+            if(sch_pin_cnt >= sch_pin_array_size) {
+              sch_pin_array_size += CADCHUNKALLOC;
+              my_realloc(_ALLOC_ID_, &sch_pin_array, sch_pin_array_size * sizeof(char *));
+              my_realloc(_ALLOC_ID_, &sch_pin_type_array, sch_pin_array_size * sizeof(char *));
+            }
+            sch_pin_array[sch_pin_cnt] = NULL;
+            sch_pin_type_array[sch_pin_cnt] = NULL;
+            my_strdup(_ALLOC_ID_, &(sch_pin_array[sch_pin_cnt]), sch_pin_name);
+            my_strdup(_ALLOC_ID_, &(sch_pin_type_array[sch_pin_cnt]), sch_pin_type);
+            sch_pin_cnt++;
+            my_free(_ALLOC_ID_, &sch_pin_name);
+          }
+          my_free(_ALLOC_ID_, &sch_pin_type);
+        }
+        err |= check_pins(i, sch_pin_cnt, sch_pin_array, sch_pin_type_array);
+      } else { /* get schematic pin list reading the schematic file (or disk undo file) */
+        if(fd || (!stat(filename, &buf) && (fd = my_fopen(filename, fopen_read_mode)))) {
+          char name[PATH_MAX];
+          char f_version[100];
+          int endfile = 0;
+          char *tmp = NULL;
+          double tmpd;
+          int symbol, tmpi;
+          short tmps;
+          f_version[0] = '\0';
+          while(!endfile) {
+            char tag[1];
+            char *sch_pin_type = NULL;
+            if(fscanf(fd," %c",tag)==EOF) break;
+            switch(tag[0]) {
+              case 'v':
+               load_ascii_string(&tmp, fd);
+               my_snprintf(f_version, S(f_version), "%s",
+                           get_tok_value(tmp, "file_version", 0));
               break;
-            case '#':
-              read_line(fd, 1);
-              break;
-            case 'F': /* extension for future symbol floater labels */
-              read_line(fd, 1);
-              break;
-            case 'L':
-            case 'B':
-              if(fscanf(fd, "%d",&tmpi)< 1) {
-                 fprintf(errfp,"sym_vs_sch_pins(): WARNING:  missing fields for LINE/BOX object, ignoring\n");
-                 read_line(fd, 0);
-                 break;
-              }
-            case 'N':
-              if(fscanf(fd, "%lf %lf %lf %lf ",&tmpd, &tmpd, &tmpd, &tmpd) < 4) {
-                 fprintf(errfp,"sym_vs_sch_pins(): WARNING:  missing fields for LINE/BOX object, ignoring\n");
-                 read_line(fd, 0);
-                 break;
-              }
-              load_ascii_string(&tmp, fd);
-              break;
-            case 'P':
-              if(fscanf(fd, "%d %d",&tmpi, &tmpi)<2) {
-                fprintf(errfp,"sym_vs_sch_pins(): WARNING: missing fields for POLYGON object, ignoring.\n");
-                read_line(fd, 0);
+  
+              case 'E':
+              case 'S':
+              case 'V':
+              case 'K':
+              case 'G':
+              case 'F': /* spectre global attribute */
+                load_ascii_string(&tmp, fd);
                 break;
-              }
-              for(j=0;j<tmpi; ++j) {
-                if(fscanf(fd, "%lf %lf ",&tmpd, &tmpd)<2) {
-                  fprintf(errfp,"sym_vs_sch_pins(): WARNING: missing fields for POLYGON points, ignoring.\n");
+              case '#':
+                read_line(fd, 1);
+                break;
+              case 'L':
+              case 'B':
+                if(fscanf(fd, "%d",&tmpi)< 1) {
+                   info("sym_vs_sch_pins(): WARNING:  missing fields for LINE/BOX object, ignoring\n");
+                   read_line(fd, 0);
+                   break;
+                }
+              case 'N':
+                if(fscanf(fd, "%lf %lf %lf %lf ",&tmpd, &tmpd, &tmpd, &tmpd) < 4) {
+                   info("sym_vs_sch_pins(): WARNING:  missing fields for LINE/BOX object, ignoring\n");
+                   read_line(fd, 0);
+                   break;
+                }
+                load_ascii_string(&tmp, fd);
+                break;
+              case 'P':
+                if(fscanf(fd, "%d %d",&tmpi, &tmpi)<2) {
+                  info("sym_vs_sch_pins(): WARNING: missing fields for POLYGON object, ignoring.\n");
                   read_line(fd, 0);
+                  break;
                 }
-              }
-              load_ascii_string( &tmp, fd);
-              break;
-            case 'A':
-              if(fscanf(fd, "%d",&tmpi)< 1) {
-                 fprintf(errfp,"sym_vs_sch_pins(): WARNING:  missing fields for ARC object, ignoring\n");
-                 read_line(fd, 0);
-                 break;
-              }
-              if(fscanf(fd, "%lf %lf %lf %lf %lf ",&tmpd, &tmpd, &tmpd, &tmpd, &tmpd) < 5) {
-                fprintf(errfp,"sym_vs_sch_pins(): WARNING:  missing fields for ARC object, ignoring\n");
-                read_line(fd, 0);
-                break;
-              }
-              load_ascii_string(&tmp, fd);
-              break;
-            case 'T':
-              load_ascii_string(&tmp,fd);
-              if(fscanf(fd, "%lf %lf %hd %hd %lf %lf ", &tmpd, &tmpd, &tmps, &tmps, &tmpd, &tmpd) < 6 ) {
-                fprintf(errfp,"sym_vs_sch_pins(): WARNING:  missing fields for TEXT object, ignoring\n");
-                read_line(fd, 0);
-                break;
-              }
-              load_ascii_string(&tmp,fd);
-              break;
-            case 'C':
-              load_ascii_string(&tmp, fd);
-              /* my_strncpy(name, tmp, S(name)); */
-              my_strncpy(name, tcl_hook2(tmp), S(name));
-
-              if(!strcmp(f_version,"1.0") ) {
-                dbg(1, "sym_vs_sch_pins(): add_ext(name,\".sym\") = %s\n", add_ext(name, ".sym") );
-                my_strncpy(name, add_ext(name, ".sym"), S(name));
-              }
-
-              if(fscanf(fd, "%lf %lf %hd %hd", &tmpd, &tmpd, &tmps, &tmps) < 4) {
-                fprintf(errfp,"sym_vs_sch_pins() WARNING: missing fields for INST object, filename=%s\n",
-                  filename);
-                read_line(fd, 0);
-                break;
-              }
-              load_ascii_string(&tmp,fd);
-
-              /* generators or names with @ characters in general need translate() to process
-               * arguments. This can not be done in this context (the current schematic we are looking
-               * into is not loaded), so skip test */
-              if( strchr(name, '@')) {
-                dbg(1, "sym_vs_sch_pins(): symbol reference %s skipped (need to translate() tokens)\n",
-                   name);
-                break;
-              }
-
-              symbol = match_symbol(name);
-              my_strdup(_ALLOC_ID_, &type, xctx->sym[symbol].type);
-              if(type && IS_PIN(type)) {
-                my_strdup(_ALLOC_ID_, &lab, expandlabel(get_tok_value(tmp, "lab", 0), &mult));
-                if(pin_cnt >= lab_array_size) {
-                  lab_array_size += CADCHUNKALLOC;
-                  my_realloc(_ALLOC_ID_, &lab_array, lab_array_size * sizeof(char *));
-                }
-                lab_array[pin_cnt] = NULL;
-                my_strdup(_ALLOC_ID_, &(lab_array[pin_cnt]), lab);
-                pin_cnt++;
-                pin_match = 0;
-                for(j=0; j < rects; ++j) {
-                  my_strdup(_ALLOC_ID_, &pin_name,
-                    expandlabel(get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr, "name", 0), &mult));
-                  my_strdup(_ALLOC_ID_, &pin_dir, get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr, "dir", 0));
-
-
-                  if( pin_name && !strcmp(pin_name, lab)) {
-                    if(!pin_dir) {
-                      char str[2048];
-                      my_snprintf(str, S(str), "Error: Symbol %s: No direction given for pin %s",
-                                xctx->sym[i].name, lab);
-                      statusmsg(str,2);
-                      my_snprintf(str, S(str), "    %s <--> ???", type);
-                      statusmsg(str,2);
-                      err |= 1;
-                    }
-                    else if(!(
-                          ( !strcmp(type, "ipin") && !strcmp(pin_dir, "in") ) ||
-                          ( !strcmp(type, "opin") && !strcmp(pin_dir, "out") ) ||
-                          ( !strcmp(type, "iopin") && !strcmp(pin_dir, "inout") )
-                        )
-                      ) {
-                      char str[2048];
-                      my_snprintf(str, S(str), "Error: Symbol %s: Unmatched subcircuit schematic pin direction: %s",
-                                  xctx->sym[i].name, lab);
-                      statusmsg(str,2);
-                      my_snprintf(str, S(str), "    %s <--> %s", type, pin_dir);
-                      statusmsg(str,2);
-                      err |= 1;
-                      for(j = 0; j < xctx->instances; ++j) {
-                        if(!xctx->x_strcmp(get_sym_name(j, 9999, 1, 0), xctx->sym[i].name)) {
-                          xctx->inst[j].color = -PINLAYER;
-                          xctx->hilight_nets=1;
-                        }
-                      }
-                    }
-                    pin_match++;
-                    break;
+                for(j=0;j<tmpi; ++j) {
+                  if(fscanf(fd, "%lf %lf ",&tmpd, &tmpd)<2) {
+                    info("sym_vs_sch_pins(): WARNING: missing fields for POLYGON points, ignoring.\n");
+                    read_line(fd, 0);
                   }
                 }
-                if(!pin_match) {
-                  char str[2048];
-                  /* fprintf(errfp, "  unmatched sch / sym pin: %s\n", lab); */
-                  my_snprintf(str, S(str), "Error: Symbol %s: schematic pin: %s not in symbol",
-                              xctx->sym[i].name, lab);
-                  statusmsg(str,2);
-                  err |= 1;
-                  for(j = 0; j < xctx->instances; ++j) {
-                    dbg(1, "inst.name=%s, sym.name=%s\n", tcl_hook2(xctx->inst[j].name), xctx->sym[i].name);
-                    if(!xctx->x_strcmp(get_sym_name(j, 9999, 1, 0), xctx->sym[i].name)) {
-                      xctx->inst[j].color = -PINLAYER;
-                      xctx->hilight_nets=1;
-                    }
-                  }
+                load_ascii_string( &tmp, fd);
+                break;
+              case 'A':
+                if(fscanf(fd, "%d",&tmpi)< 1) {
+                   info("sym_vs_sch_pins(): WARNING:  missing fields for ARC object, ignoring\n");
+                   read_line(fd, 0);
+                   break;
                 }
-              }
-              break;
-            case '[':
-              load_sym_def(name, fd);
-              break;
-            case ']':
-              read_line(fd, 0);
-              endfile=1;
-              break;
-            default:
-              if( tag[0] == '{' ) ungetc(tag[0], fd);
-              read_record(tag[0], fd, 0);
-              break;
-          }
-          read_line(fd, 0); /* discard any remaining characters till (but not including) newline */
-          if(!f_version[0]) {
-            my_snprintf(f_version, S(f_version), "1.0");
-            dbg(1, "sym_vs_sch_pins(): no file_version, assuming file_version=%s\n", f_version);
-          }
-        } /* while(!endfile) */
-        fclose(fd);
-        if(pin_cnt != rects) {
-          char str[2048];
-          my_snprintf(str, S(str), "Error: Symbol %s has %d pins, its schematic has %d pins",
-                      xctx->sym[i].name, rects, pin_cnt);
-          statusmsg(str,2);
-          err |= 1;
-          for(j = 0; j < xctx->instances; ++j) {
-            if(!xctx->x_strcmp(get_sym_name(j, 9999, 1, 0), xctx->sym[i].name)) {
-              xctx->inst[j].color = -PINLAYER;
-              xctx->hilight_nets=1;
+                if(fscanf(fd, "%lf %lf %lf %lf %lf ",&tmpd, &tmpd, &tmpd, &tmpd, &tmpd) < 5) {
+                  info("sym_vs_sch_pins(): WARNING:  missing fields for ARC object, ignoring\n");
+                  read_line(fd, 0);
+                  break;
+                }
+                load_ascii_string(&tmp, fd);
+                break;
+              case 'T':
+                load_ascii_string(&tmp,fd);
+                if(fscanf(fd, "%lf %lf %hd %hd %lf %lf ", &tmpd, &tmpd, &tmps, &tmps, &tmpd, &tmpd) < 6 ) {
+                  info("sym_vs_sch_pins(): WARNING:  missing fields for TEXT object, ignoring\n");
+                  read_line(fd, 0);
+                  break;
+                }
+                load_ascii_string(&tmp,fd);
+                break;
+              case 'C':
+                load_ascii_string(&tmp, fd);
+                /* my_strncpy(name, tmp, S(name)); */
+                my_strncpy(name, tcl_hook2(tmp), S(name));
+  
+                if(!strcmp(f_version,"1.0") ) {
+                  dbg(1, ("sym_vs_sch_pins(): add_ext(name,\".sym\") = %s\n", add_ext(name, ".sym") ));
+                  my_strncpy(name, add_ext(name, ".sym"), S(name));
+                }
+  
+                if(fscanf(fd, "%lf %lf %hd %hd", &tmpd, &tmpd, &tmps, &tmps) < 4) {
+                  info("sym_vs_sch_pins() WARNING: missing fields for INST object, filename=%s\n",
+                    filename);
+                  read_line(fd, 0);
+                  break;
+                }
+                load_ascii_string(&tmp,fd);
+  
+                /* generators or names with @ characters in general need translate() to process
+                 * arguments. This can not be done in this context (the current schematic we are looking
+                 * into is not loaded), so skip test */
+                if( strpbrk(name, "@%")) {
+                  dbg(1, ("sym_vs_sch_pins(): symbol reference %s skipped (need to translate() tokens)\n",
+                     name));
+                  break;
+                }
+  
+                symbol = match_symbol(name);
+                my_strdup(_ALLOC_ID_, &sch_pin_type, xctx->sym[symbol].type);
+                if(sch_pin_type && IS_PIN(sch_pin_type)) {
+                  char *sch_pin_name = NULL;
+                  my_strdup(_ALLOC_ID_, &sch_pin_name, get_tok_value(tmp, "lab", 0));
+                  if(sch_pin_cnt >= sch_pin_array_size) {
+                    sch_pin_array_size += CADCHUNKALLOC;
+                    my_realloc(_ALLOC_ID_, &sch_pin_array, sch_pin_array_size * sizeof(char *));
+                    my_realloc(_ALLOC_ID_, &sch_pin_type_array, sch_pin_array_size * sizeof(char *));
+                  }
+                  sch_pin_array[sch_pin_cnt] = NULL;
+                  sch_pin_type_array[sch_pin_cnt] = NULL;
+                  my_strdup(_ALLOC_ID_, &(sch_pin_array[sch_pin_cnt]), sch_pin_name);
+                  my_strdup(_ALLOC_ID_, &(sch_pin_type_array[sch_pin_cnt]), sch_pin_type);
+                  sch_pin_cnt++;
+                  my_free(_ALLOC_ID_, &sch_pin_name);
+                }
+                my_free(_ALLOC_ID_, &sch_pin_type);
+                break;
+              case '[':
+                load_sym_def(name, fd, NULL);
+                break;
+              case ']':
+                read_line(fd, 0);
+                endfile=1;
+                break;
+              default:
+                if( tag[0] == '{' ) ungetc(tag[0], fd);
+                read_record(tag[0], fd, 0);
+                break;
             }
-          }
+            read_line(fd, 0); /* discard any remaining characters till (but not including) newline */
+            if(!f_version[0]) {
+              my_snprintf(f_version, S(f_version), "1.0");
+              dbg(1, ("sym_vs_sch_pins(): no file_version, assuming file_version=%s\n", f_version));
+            }
+          } /* while(!endfile) */
+          if(xctx->undo_type == 0 && undo_found) close_undo_file(fd, pid);
+          else fclose(fd);
+  
+          err |= check_pins(i, sch_pin_cnt, sch_pin_array, sch_pin_type_array);
+
+          my_free(_ALLOC_ID_, &tmp);
+        } /* if(fd || (!stat(filename, &buf) && (fd = my_fopen(...)))) */
+      } /* get_from_memory_undo == 0 */
+
+      if(sch_pin_array_size) {
+        int k;
+        for(k=0;k<sch_pin_cnt; ++k) {
+          my_free(_ALLOC_ID_, &(sch_pin_array[k]));
+          my_free(_ALLOC_ID_, &(sch_pin_type_array[k]));
         }
-        for(j=0; j < rects; ++j) {
-          my_strdup(_ALLOC_ID_, &pin_name,
-             expandlabel(get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr, "name", 0), &mult));
-          pin_match = 0;
-          for(k=0; k<pin_cnt; ++k) {
-            if(pin_name && !strcmp(lab_array[k], pin_name)) {
-              pin_match++;
-              break;
-            }
-          }
-          if(!pin_match) {
-            char str[2048];
-            /* fprintf(errfp, "  unmatched sch / sym pin: %s\n", lab); */
-            my_snprintf(str, S(str), "Error: Symbol %s: symbol pin: %s not in schematic",
-                        xctx->sym[i].name, pin_name ? pin_name : "<NULL>");
-            statusmsg(str,2);
-            err |= 1;
-            for(k = 0; k < xctx->instances; ++k) {
-              if(!xctx->x_strcmp(get_sym_name(k, 9999, 1, 0), xctx->sym[i].name)) {
-                xctx->inst[k].color = -PINLAYER;
-                xctx->hilight_nets=1;
-              }
-            }
-          }
-        }
+        my_free(_ALLOC_ID_, &sch_pin_array);
+        my_free(_ALLOC_ID_, &sch_pin_type_array);
+        sch_pin_array_size = 0;
+        sch_pin_cnt=0;
       }
-      if(lab_array_size) {
-        for(k=0;k<pin_cnt; ++k) {
-          my_free(_ALLOC_ID_, &(lab_array[k]));
-        }
-        my_free(_ALLOC_ID_, &lab_array);
-        lab_array_size = 0;
-        pin_cnt=0;
-      }
+
     } /* if( ... "subcircuit"... ) */
-    my_free(_ALLOC_ID_, &type);
-    my_free(_ALLOC_ID_, &tmp);
-    my_free(_ALLOC_ID_, &lab);
-    my_free(_ALLOC_ID_, &pin_name);
-    my_free(_ALLOC_ID_, &pin_dir);
   } /* for(i=0;i<n_syms; ++i) */
 
-  if(all == -1) while(xctx->symbols > n_syms) remove_symbol(xctx->symbols - 1);
+  /* remove symbols loaded by this function if all == -1. See comment at beginning of function */
+  if(all == -1) while(xctx->symbols > n_syms) remove_symbol(xctx->symbols - 1, 1);
   return err;
 }

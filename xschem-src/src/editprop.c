@@ -55,7 +55,7 @@ char *my_strcasestr(const char *haystack, const char *needle)
     found = 1;
     for(n = needle; *n; n++) {
       const char *hh = h + (n - needle);
-      dbg(1, "%c   %c\n", *hh, *n);
+      dbg(1, ("%c   %c\n", *hh, *n));
       if(toupper(*hh) != toupper(*n)) {
         found = 0;
         break;
@@ -129,7 +129,7 @@ int strboolcmp(const char *str, const char *boolean)
   else s = -1;
   if(s == -1 || b == -1) retval = strcmp(str, boolean);
   else retval = (s != b);
-  dbg(2, "strboolcmp(): str=%s boolean=%s retval=%d\n", str, boolean, retval);
+  dbg(2, ("strboolcmp(): str=%s boolean=%s retval=%d\n", str, boolean, retval));
   return retval;
 }
 
@@ -238,16 +238,16 @@ size_t my_strdup(int id, char **dest, const char *src) /* empty source string --
  size_t len;
 
  if(*dest == src && src!=NULL)
-   dbg(0, "my_strdup(): WARNING: src == *dest == %p, id=%d\n", src, id);
+   info("my_strdup(): WARNING: src == *dest == %p, id=%d\n", src, id);
  if(src!=NULL && src[0]!='\0')  {
    len = strlen(src)+1;
    my_realloc(id, dest, len);
    memcpy(*dest, src, len);
-   dbg(3,"my_strdup(%d,): duplicated string %s\n", id, src);
+   dbgmem(3,("my_strdup(%d,): duplicated string %s\n", id, src));
    return len-1;
  } else if(*dest) {
    my_free(_ALLOC_ID_, dest);
-   dbg(3,"my_strdup(%d,): freed destination ptr\n", id);
+   dbgmem(3,("my_strdup(%d,): freed destination ptr\n", id));
  }
 
  return 0;
@@ -258,13 +258,13 @@ void my_strndup(int id, char **dest, const char *src, size_t n) /* empty source 
 
 {
  if(*dest!=NULL) {
-   dbg(3,"  my_strndup:  calling my_free\n");
+   dbgmem(3,("  my_strndup:  calling my_free\n"));
    my_free(_ALLOC_ID_, dest);
  }
  if(src!=NULL && src[0]!='\0')
  {
   /* 20180924 replace strndup() */
-  char *p = memchr(src, '\0', n);
+  const char *p = memchr(src, '\0', n);
   if(p) n = p - src;
   *dest = my_malloc(id, n+1);
   if(*dest) {
@@ -273,7 +273,7 @@ void my_strndup(int id, char **dest, const char *src, size_t n) /* empty source 
   }
   /* *dest=strndup(src, n); */
 
-  dbg(3,"my_strndup(%d,): duplicated string %s\n", id, src);
+  dbgmem(3,("my_strndup(%d,): duplicated string %s\n", id, src));
  }
 }
 
@@ -309,14 +309,21 @@ char *my_expand(const char *s, int tabstop)
   return t;
 }
 
-void dbg(int level, char *fmt, ...)
+void info(char *fmt, ...)
 {
-  if(debug_var>=level) {
     va_list args;
     va_start(args, fmt);
     vfprintf(errfp, fmt, args);
     va_end(args);
-  }
+}
+
+
+void dbg_internal(char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(errfp, fmt, args);
+    va_end(args);
 }
 
 #ifdef HAS_SNPRINTF
@@ -351,7 +358,6 @@ size_t my_snprintf(char *string, size_t size, const char *format, ...)
 
   va_start(args, format);
 
-  /* fprintf(errfp, "my_snprintf(): size=%d, format=%s\n", size, format); */
   prev = format;
   format_spec = 0;
   overflow = 0;
@@ -458,11 +464,10 @@ size_t my_snprintf(char *string, size_t size, const char *format, ...)
     memcpy(string + n, prev, l+1);
     n += l;
   } else {
-    dbg(1, "my_snprintf(): overflow, target size=%d, format=%s\n", size, format);
+    info("my_snprintf(): overflow, target size=%d, format=%s\n", size, format);
   }
 
   va_end(args);
-  /* fprintf(errfp, "my_snprintf(): returning: |%s|\n", string); */
   return n;
 }
 #endif /* HAS_SNPRINTF */
@@ -471,16 +476,16 @@ size_t my_strdup2(int id, char **dest, const char *src) /* 20150409 duplicates a
 {
  size_t len;
  if(*dest == src && src!=NULL)
-   dbg(0, "my_strdup2(): WARNING: src == *dest == %p, id=%d\n", src, id);
+   info("my_strdup2(): WARNING: src == *dest == %p, id=%d\n", src, id);
  if(src!=NULL) {
    len = strlen(src)+1;
    my_realloc(id, dest, len);
    memcpy(*dest, src, len);
-   dbg(3,"my_strdup2(%d,): duplicated string %s\n", id, src);
+   dbgmem(3,("my_strdup2(%d,): duplicated string %s\n", id, src));
    return len-1;
  } else if(*dest) {
    my_free(_ALLOC_ID_, dest);
-   dbg(3,"my_strdup2(%d,): freed destination ptr\n", id);
+   dbgmem(3,("my_strdup2(%d,): freed destination ptr\n", id));
  }
  return 0;
 }
@@ -588,7 +593,7 @@ char *dtoa_eng(double i, int precision)
   size_t n;
   int suffix = 0;
   double absi = fabs(i);
-  dbg(1,  "dtoa_eng(): i=%.17g, absi=%.17g, precision=%d\n", i, absi, precision);
+  dbg(1,  ("dtoa_eng(): i=%.17g, absi=%.17g, precision=%d\n", i, absi, precision));
   if     (absi == 0.0)        {            suffix =  0 ;}
   else if(absi < 0.999999e-23) { i  = 0.0 ; suffix =  0 ;}
   else if(absi > 0.999999e12)  { i /= 1e12; suffix = 'T';}
@@ -659,7 +664,7 @@ size_t my_mstrcat(int id, char **str, const char *add, ...)
         my_realloc(id, str, s + a );
         memcpy(*str + s, append_str, a);
         s += a - 1;
-        dbg(3,"my_mstrcat(%d,): reallocated string %s\n", id, *str);
+        dbgmem(3,("my_mstrcat(%d,): reallocated string %s\n", id, *str));
       }
     } else {
       if(append_str[0]) {
@@ -667,7 +672,7 @@ size_t my_mstrcat(int id, char **str, const char *add, ...)
         *str = my_malloc(id, a);
         memcpy(*str, append_str, a);
         s = a - 1;
-        dbg(3,"my_mstrcat(%d,): allocated string %s\n", id, *str);
+        dbgmem(3,("my_mstrcat(%d,): allocated string %s\n", id, *str));
       }
     }
     append_str = va_arg(args, const char *);
@@ -679,8 +684,8 @@ size_t my_mstrcat(int id, char **str, const char *add, ...)
 size_t my_strcat(int id, char **str, const char *append_str)
 {
   size_t s, a;
-  dbg(3,"my_strcat(%d,): str=%s  append_str=%s\n", id,
-    *str? *str : "<NULL>", append_str ? append_str : "<NULL>");
+  dbgmem(3,("my_strcat(%d,): str=%s  append_str=%s\n", id,
+    *str? *str : "<NULL>", append_str ? append_str : "<NULL>"));
   if( *str != NULL)
   {
     s = strlen(*str);
@@ -688,14 +693,14 @@ size_t my_strcat(int id, char **str, const char *append_str)
     a = strlen(append_str) + 1;
     my_realloc(id, str, s + a );
     memcpy(*str + s, append_str, a);
-    dbg(3,"my_strcat(%d,): reallocated string %s\n", id, *str);
+    dbgmem(3,("my_strcat(%d,): reallocated string %s\n", id, *str));
     return s + a - 1;
   } else { /* str = NULL */
     if(append_str == NULL || append_str[0] == '\0') return 0;
     a = strlen(append_str) + 1;
     *str = my_malloc(id, a );
     memcpy(*str, append_str, a);
-    dbg(3,"my_strcat(%d,): allocated string %s\n", id, *str);
+    dbgmem(3,("my_strcat(%d,): allocated string %s\n", id, *str));
     return a - 1;
   }
 }
@@ -704,8 +709,8 @@ size_t my_strcat(int id, char **str, const char *append_str)
 size_t my_strcat2(int id, char **str, const char *append_str)
 {
   size_t s, a;
-  dbg(3,"my_strcat(%d,): str=%s  append_str=%s\n", id,
-    *str? *str : "<NULL>", append_str ? append_str : "<NULL>");
+  dbgmem(3,("my_strcat(%d,): str=%s  append_str=%s\n", id,
+    *str? *str : "<NULL>", append_str ? append_str : "<NULL>"));
   if( *str != NULL)
   {
     s = strlen(*str);
@@ -713,14 +718,14 @@ size_t my_strcat2(int id, char **str, const char *append_str)
     a = strlen(append_str) + 1;
     my_realloc(id, str, s + a );
     memcpy(*str + s, append_str, a);
-    dbg(3,"my_strcat(%d,): reallocated string %s\n", id, *str);
+    dbgmem(3,("my_strcat(%d,): reallocated string %s\n", id, *str));
     return s + a - 1;
   } else { /* str == NULL */
     if(append_str == NULL ) return 0;
     a = strlen(append_str) + 1;
     *str = my_malloc(id, a );
     memcpy(*str, append_str, a);
-    dbg(3,"my_strcat(%d,): allocated string %s\n", id, *str);
+    dbgmem(3,("my_strcat(%d,): allocated string %s\n", id, *str));
     return a - 1;
   }
 }
@@ -729,8 +734,8 @@ size_t my_strcat2(int id, char **str, const char *append_str)
 size_t my_strncat(int id, char **str, size_t n, const char *append_str)
 {
  size_t s, a;
- dbg(3,"my_strncat(%d,): str=%s  append_str=%s\n", id,
-    *str? *str : "<NULL>", append_str ? append_str : "<NULL>");
+ dbgmem(3,("my_strncat(%d,): str=%s  append_str=%s\n", id,
+    *str? *str : "<NULL>", append_str ? append_str : "<NULL>"));
  a = strlen(append_str) + 1;
  if(a > n + 1) a = n + 1;
  if( *str != NULL)
@@ -740,7 +745,7 @@ size_t my_strncat(int id, char **str, size_t n, const char *append_str)
   my_realloc(id, str, s + a );
   memcpy(*str + s, append_str, a);
   *(*str + s + a - 1) = '\0';
-  dbg(3,"my_strncat(%d,): reallocated string %s\n", id, *str);
+  dbgmem(3,("my_strncat(%d,): reallocated string %s\n", id, *str));
   return s + a - 1;
  }
  else
@@ -749,7 +754,7 @@ size_t my_strncat(int id, char **str, size_t n, const char *append_str)
   *str = my_malloc(id,  a );
   memcpy(*str, append_str, a);
   *(*str + a - 1) = '\0';
-  dbg(3,"my_strncat(%d,): allocated string %s\n", id, *str);
+  dbgmem(3,("my_strncat(%d,): allocated string %s\n", id, *str));
   return a - 1;
  }
 }
@@ -760,9 +765,9 @@ void *my_calloc(int id, size_t nmemb, size_t size)
    if(size*nmemb > 0) {
      ptr=calloc(nmemb, size);
      if(ptr == NULL)
-        fprintf(errfp,"my_calloc(%d,): allocation failure %ld * %ld bytes\n", id, nmemb, size);
-     dbg(3, "\nmy_calloc(%d,): allocating %p , %lu bytes\n",
-               id, ptr, (unsigned long) (size*nmemb));
+        info("my_calloc(%d,): allocation failure %ld * %ld bytes\n", id, nmemb, size);
+     dbgmem(3, ("\nmy_calloc(%d,): allocating %p , %lu bytes\n",
+               id, ptr, (unsigned long) (size*nmemb)));
    }
    else ptr = NULL;
    return ptr;
@@ -773,8 +778,8 @@ void *my_malloc(int id, size_t size)
  void *ptr;
  if(size>0) {
    ptr=malloc(size);
-   if(ptr == NULL) fprintf(errfp,"my_malloc(%d,): allocation failure for %ld bytes\n", id, size);
-   dbg(3, "\nmy_malloc(%d,): allocating %p , %lu bytes\n", id, ptr, (unsigned long) size);
+   if(ptr == NULL) info("my_malloc(%d,): allocation failure for %ld bytes\n", id, size);
+   dbgmem(3, ("\nmy_malloc(%d,): allocating %p , %lu bytes\n", id, ptr, (unsigned long) size));
  }
  else ptr=NULL;
  return ptr;
@@ -782,23 +787,21 @@ void *my_malloc(int id, size_t size)
 
 void my_realloc(int id, void *ptr,size_t size)
 {
- void *a;
- char old[100] = "";
+ void *old = *(void **)ptr;
  void *tmp;
- a = *(void **)ptr;
- if(debug_var > 2) my_snprintf(old, S(old), "%p", a);
+ (void) old; /* avoid compiler warnings (used only in dbgmem) */
  if(size == 0) {
    free(*(void **)ptr);
-   dbg(3, "\nmy_free(%d,):  my_realloc_freeing %p\n",id, *(void **)ptr);
+   dbgmem(3, ("\nmy_free(%d,):  my_realloc_freeing %p\n",id, *(void **)ptr));
    *(void **)ptr=NULL;
  } else {
    tmp = realloc(*(void **)ptr,size);
    if(tmp == NULL) {
-     fprintf(errfp,"my_realloc(%d,): allocation failure for %ld bytes\n", id, size);
+     info("my_realloc(%d,): allocation failure for %ld bytes\n", id, size);
    } else {
       *(void **)ptr = tmp;
-      dbg(3, "\nmy_realloc(%d,): reallocating %s --> %p to %lu bytes\n",
-             id, old, *(void **)ptr,(unsigned long) size);
+      dbgmem(3, ("\nmy_realloc(%d,): reallocating %p --> %p to %lu bytes\n",
+             id, old, *(void **)ptr,(unsigned long) size));
    }
  }
 }
@@ -806,11 +809,11 @@ void my_realloc(int id, void *ptr,size_t size)
 char *my_free(int id, void *ptr)
 {
  if(*(void **)ptr) {
-   dbg(3, "\nmy_free(%d,):  freeing %p\n", id, *(void **)ptr);
+   dbgmem(3, ("\nmy_free(%d,):  freeing %p\n", id, *(void **)ptr));
    free(*(void **)ptr);
    *(void **)ptr=NULL;
  } else {
-   dbg(3, "\n--> my_free(%d,): trying to free NULL pointer\n", id);
+   dbgmem(3, ("\n--> my_free(%d,): trying to free NULL pointer\n", id));
  }
  return NULL;
 }
@@ -823,11 +826,11 @@ int my_strncpy(char *d, const char *s, size_t n)
 {
   int i = 0;
   n -= 1;
-  dbg(3, "my_strncpy():  copying %s to %lu\n", s, (unsigned long)d);
+  dbgmem(3, ("my_strncpy():  copying %s to %p\n", s, (void *)d));
   while( (d[i] = s[i]) )
   {
     if(i == n) {
-      if(s[i] != '\0') dbg(1, "my_strncpy(): overflow, n=%d, s=%s\n", n+1, s);
+      if(s[i] != '\0') dbg(1, ("my_strncpy(): overflow, n=%d, s=%s\n", n+1, s));
       d[i] = '\0';
       return i;
     }
@@ -854,8 +857,8 @@ void set_inst_prop(int i)
   char *tmp = NULL;
   if(xctx->inst[i].ptr == -1) return;
   ptr = (xctx->inst[i].ptr+ xctx->sym)->templ;
-  dbg(1, "set_inst_prop(): i=%d, name=%s, prop_ptr = %s, template=%s\n",
-     i, xctx->inst[i].name, xctx->inst[i].prop_ptr, ptr);
+  dbg(1, ("set_inst_prop(): i=%d, name=%s, prop_ptr = %s, template=%s\n",
+     i, xctx->inst[i].name, xctx->inst[i].prop_ptr, ptr));
   my_strdup(_ALLOC_ID_, &xctx->inst[i].prop_ptr, ptr);
   if(get_tok_value(ptr, "name",0)[0]) {
     my_strdup(_ALLOC_ID_, &tmp, xctx->inst[i].prop_ptr);
@@ -1019,7 +1022,7 @@ static int edit_rect_property(int x)
   double bus = 0.0, oldbus = 0.0;
   double width;
   if(x < 0 || x > 2) {
-    fprintf(errfp, "edit_rect_property() : unknown parameter x=%d\n",x);
+    info("edit_rect_property() : unknown parameter x=%d\n",x);
     return 0;
   }
   my_strdup(_ALLOC_ID_, &oldprop, xctx->rect[xctx->sel_array[0].col][xctx->sel_array[0].n].prop_ptr);
@@ -1038,7 +1041,7 @@ static int edit_rect_property(int x)
   preserve = tclgetboolvar("preserve_unchanged_attrs");
   if(strcmp(tclgetvar("tctx::rcode"),"") )
   {
-    xctx->push_undo();
+    xctx->push_undo(0);
     for(i=0; i<xctx->lastsel; ++i) {
       if(xctx->sel_array[i].type != xRECT) continue;
       c = xctx->sel_array[i].col;
@@ -1134,7 +1137,7 @@ static int edit_line_property(void)
   if(strcmp(tclgetvar("tctx::rcode"),"") )
   {
     double y1, y2;
-    xctx->push_undo();
+    xctx->push_undo(0);
     bbox(START, 0.0 , 0.0 , 0.0 , 0.0);
     for(i=0; i<xctx->lastsel; ++i) {
       if(xctx->sel_array[i].type != LINE) continue;
@@ -1196,7 +1199,7 @@ static int edit_wire_property(void)
   preserve = tclgetboolvar("preserve_unchanged_attrs");
   if(strcmp(tclgetvar("tctx::rcode"),"") )
   {
-    xctx->push_undo();
+    xctx->push_undo(0);
     bbox(START, 0.0 , 0.0 , 0.0 , 0.0);
     for(i=0; i<xctx->lastsel; ++i) {
       double ov, y1, y2;
@@ -1255,7 +1258,7 @@ static int edit_arc_property(void)
   preserve = tclgetboolvar("preserve_unchanged_attrs");
   if(strcmp(tclgetvar("tctx::rcode"),"") )
   {
-   xctx->push_undo();
+   xctx->push_undo(0);
    for(ii=0; ii<xctx->lastsel; ii++) {
      if(xctx->sel_array[ii].type != ARC) continue;
 
@@ -1322,7 +1325,7 @@ static int edit_polygon_property(void)
   int preserve, modified = 0;
   double width;
 
-  dbg(1, "edit_property(): input property:\n");
+  dbg(1, ("edit_property(): input property:\n"));
   my_strdup(_ALLOC_ID_, &oldprop, xctx->poly[xctx->sel_array[0].col][xctx->sel_array[0].n].prop_ptr);
   if(oldprop && oldprop[0]) {
     tclsetvar("tctx::retval", oldprop);
@@ -1335,7 +1338,7 @@ static int edit_polygon_property(void)
   preserve = tclgetboolvar("preserve_unchanged_attrs");
   if(strcmp(tclgetvar("tctx::rcode"),"") )
   {
-   xctx->push_undo();
+   xctx->push_undo(0);
    for(ii=0; ii<xctx->lastsel; ii++) {
      if(xctx->sel_array[ii].type != POLYGON) continue;
 
@@ -1414,10 +1417,10 @@ static int edit_text_property(int x)
   char *oldprop = NULL;
 
   if(x < 0 || x > 2) {
-    fprintf(errfp, "edit_text_property() : unknown parameter x=%d\n",x);
+    info("edit_text_property() : unknown parameter x=%d\n",x);
     return 0;
   }
-  dbg(1, "edit_text_property(): entering\n");
+  dbg(1, ("edit_text_property(): entering\n"));
   sel = xctx->sel_array[0].n;
   my_strdup(_ALLOC_ID_, &oldprop, xctx->text[sel].prop_ptr);
   if(oldprop && oldprop[0])
@@ -1447,17 +1450,17 @@ static int edit_text_property(int x)
   preserve = tclgetboolvar("preserve_unchanged_attrs");
   if(x == 0 || x == 1) {
     if(strcmp(xctx->text[sel].txt_ptr, tclgetvar("tctx::retval") ) ) {
-      dbg(1, "edit_text_property(): x=%d, text_changed=1\n", x);
+      dbg(1, ("edit_text_property(): x=%d, text_changed=1\n", x));
       text_changed=1;
     }
   }
   if(strcmp(tclgetvar("tctx::rcode"),"") )
   {
     char *estr = NULL;
-    dbg(1, "edit_text_property(): tctx::rcode !=\"\"\n");
+    dbg(1, ("edit_text_property(): tctx::rcode !=\"\"\n"));
     if(text_changed || size_changed || props_changed) {
       modified = 1;
-      xctx->push_undo();
+      xctx->push_undo(0);
     }
     /* set_modify(-2); */ /* ? Not needed, overkill... clear text floater caches */
     for(k=0;k<xctx->lastsel; ++k)
@@ -1552,12 +1555,13 @@ int drc_check(int i)
     end = i + 1;
   }
   for(j = start; j < end; j++) {
+    if(xctx->inst[j].ptr < 0) continue;
     my_strdup(_ALLOC_ID_, &drc, get_tok_value(xctx->sym[xctx->inst[j].ptr].prop_ptr, "drc", 2));
     if(drc) {
-      my_strdup(_ALLOC_ID_, &res, translate3(drc, 1,
+      my_strdup(_ALLOC_ID_, &res, translate3(drc, j, 1,
                 xctx->inst[j].prop_ptr, xctx->sym[xctx->inst[j].ptr].templ, NULL, NULL, &res1));
       my_free(_ALLOC_ID_, &res1);
-      dbg(1, "drc_check(): res = |%s|, drc=|%s|\n", res, drc);
+      dbg(1, ("drc_check(): res = |%s|, drc=|%s|\n", res, drc));
       if(res) {
         const char *result;
         const char *replace_res;
@@ -1579,7 +1583,7 @@ int drc_check(int i)
       statusmsg(check_result, 3);
       tcleval("show_infotext 1");
     } else {
-      dbg(0, "%s\n", check_result);
+      info("%s\n", check_result);
     }
     my_free(_ALLOC_ID_, &check_result);
   }
@@ -1603,10 +1607,10 @@ static int update_symbol(const char *result, int x, int selected_inst)
   int modified = 0;
   char *res = NULL;
 
-  dbg(1, "update_symbol(): entering, selected_inst = %d\n", selected_inst);
+  dbg(1, ("update_symbol(): entering, selected_inst = %d\n", selected_inst));
   *ii = selected_inst;
   if(!result) {
-   dbg(1, "update_symbol(): edit symbol prop aborted\n");
+   dbg(1, ("update_symbol(): edit symbol prop aborted\n"));
    my_free(_ALLOC_ID_, &xctx->old_prop);
    return 0;
   }
@@ -1615,15 +1619,15 @@ static int update_symbol(const char *result, int x, int selected_inst)
     my_strdup(_ALLOC_ID_,  &new_prop,
       subst_token(xctx->old_prop, "value", (char *) tclgetvar("tctx::retval") )
     );
-    dbg(1, "update_symbol(): new_prop=%s\n", new_prop);
-    dbg(1, "update_symbol(): tcl tctx::retval==%s\n", tclgetvar("tctx::retval"));
+    dbg(1, ("update_symbol(): new_prop=%s\n", new_prop));
+    dbg(1, ("update_symbol(): tcl tctx::retval==%s\n", tclgetvar("tctx::retval")));
   }
   else {
     my_strdup(_ALLOC_ID_, &new_prop, (char *) tclgetvar("tctx::retval"));
-    dbg(1, "update_symbol(): new_prop=%s\n", new_prop);
+    dbg(1, ("update_symbol(): new_prop=%s\n", new_prop));
   }
   my_strncpy(symbol, (char *) tclgetvar("symbol") , S(symbol));
-  dbg(1, "update_symbol(): symbol=%s\n", symbol);
+  dbg(1, ("update_symbol(): symbol=%s\n", symbol));
   no_change_props=tclgetboolvar("no_change_attrs");
   only_different=tclgetboolvar("preserve_unchanged_attrs");
   copy_cell=tclgetboolvar("user_wants_copy_cell");
@@ -1640,9 +1644,10 @@ static int update_symbol(const char *result, int x, int selected_inst)
     changed_symbol = 1;
   }
   for(k=0;k<xctx->lastsel; ++k) {
-    dbg(1, "update_symbol(): for k loop: k=%d\n", k);
+    dbg(1, ("update_symbol(): for k loop: k=%d\n", k));
     if(xctx->sel_array[k].type != ELEMENT) continue;
     *ii=xctx->sel_array[k].n;
+    if(xctx->inst[*ii].ptr < 0) continue;
     old_prefix=(get_tok_value(xctx->sym[xctx->inst[*ii].ptr].templ, "name",0))[0];
     /* 20171220 calculate bbox before changes to correctly redraw areas */
     /* must be recalculated as cairo text extents vary with zoom factor. */
@@ -1656,7 +1661,7 @@ static int update_symbol(const char *result, int x, int selected_inst)
         char * ss=NULL;
         my_strdup(_ALLOC_ID_, &ss, xctx->inst[*ii].prop_ptr);
         if( set_different_token(&ss, new_prop, xctx->old_prop) ) {
-          if(!pushed) { xctx->push_undo(); pushed=1;}
+          if(!pushed) { xctx->push_undo(0); pushed=1;}
           my_strdup(_ALLOC_ID_, &xctx->inst[*ii].prop_ptr, ss);
         }
         my_free(_ALLOC_ID_, &ss);
@@ -1664,14 +1669,14 @@ static int update_symbol(const char *result, int x, int selected_inst)
       else {
         if(new_prop) {
           if(!xctx->inst[*ii].prop_ptr || strcmp(xctx->inst[*ii].prop_ptr, new_prop)) {
-            dbg(1, "update_symbol(): changing prop: |%s| -> |%s|\n",
-                xctx->inst[*ii].prop_ptr, new_prop);
-            if(!pushed) { xctx->push_undo(); pushed=1;}
-            dbg(1, "update_symbol(): *ii=%d, new_prop=%s\n", *ii, new_prop ? new_prop : "<NULL>");
+            dbg(1, ("update_symbol(): changing prop: |%s| -> |%s|\n",
+                xctx->inst[*ii].prop_ptr, new_prop));
+            if(!pushed) { xctx->push_undo(0); pushed=1;}
+            dbg(1, ("update_symbol(): *ii=%d, new_prop=%s\n", *ii, new_prop ? new_prop : "<NULL>"));
             my_strdup(_ALLOC_ID_, &xctx->inst[*ii].prop_ptr, new_prop);
           }
         }  else {
-          if(!pushed) { xctx->push_undo(); pushed=1;}
+          if(!pushed) { xctx->push_undo(0); pushed=1;}
           my_strdup(_ALLOC_ID_, &xctx->inst[*ii].prop_ptr, "");
         }
       }
@@ -1683,7 +1688,7 @@ static int update_symbol(const char *result, int x, int selected_inst)
     sym_number = -1;
     my_strdup2(_ALLOC_ID_, &translated_sym, translate(*ii, symbol, &res));
     my_free(_ALLOC_ID_, &res);
-    dbg(1, "update_symbol: %s -- %s\n", translated_sym, old_translated_sym);
+    dbg(1, ("update_symbol: %s -- %s\n", translated_sym, old_translated_sym));
     if(changed_symbol ||
         ( !strcmp(symbol, xctx->inst[*ii].name) &&  strcmp(translated_sym, old_translated_sym) ) ) {
       sym_number=match_symbol(translated_sym); /* check if exist */
@@ -1694,7 +1699,7 @@ static int update_symbol(const char *result, int x, int selected_inst)
 
     if(sym_number>=0) /* changing symbol ! */
     {
-      if(!pushed) { xctx->push_undo(); pushed=1;}
+      if(!pushed) { xctx->push_undo(0); pushed=1;}
       delete_inst_node(*ii); /* 20180208 fix crashing bug: delete node info if changing symbol */
                         /* if number of pins is different we must delete these data *before* */
                         /* changing ysmbol, otherwise *ii might end up deleting non allocated data. */
@@ -1709,7 +1714,7 @@ static int update_symbol(const char *result, int x, int selected_inst)
     my_strdup(_ALLOC_ID_, &name, get_tok_value(xctx->inst[*ii].prop_ptr, "name", 1));
     if(name && name[0] ) {
       char *old_name = NULL;
-      dbg(1, "update_symbol(): prefix!='\\0', name=%s\n", name);
+      dbg(1, ("update_symbol(): prefix!='\\0', name=%s\n", name));
       /* change prefix if changing symbol type; */
       if(prefix && old_prefix && old_prefix != prefix) {
         name[0]=(char)prefix;
@@ -1724,15 +1729,15 @@ static int update_symbol(const char *result, int x, int selected_inst)
 
 
       if(strcmp(old_name, name)) {
-        if(!pushed) { xctx->push_undo(); pushed=1;}
+        if(!pushed) { xctx->push_undo(0); pushed=1;}
         if(!k) hash_names(-1, XINSERT);
         hash_names(*ii, XDELETE);
-        dbg(1, "update_symbol(): delete %s\n", xctx->inst[*ii].instname);
+        dbg(1, ("update_symbol(): delete %s\n", xctx->inst[*ii].instname));
         new_prop_string(*ii, ptr,               /* sets also inst[].instname */
            tclgetboolvar("disable_unique_names")); /* set new prop_ptr */
         hash_names(*ii, XINSERT);
         update_attached_floaters(old_name, *ii, 1);
-        dbg(1, "update_symbol(): insert %s\n", xctx->inst[*ii].instname);
+        dbg(1, ("update_symbol(): insert %s\n", xctx->inst[*ii].instname));
       }
       my_free(_ALLOC_ID_, &old_name);
     }
@@ -1771,6 +1776,7 @@ static int edit_symbol_property(int x, int first_sel)
    int modified = 0;
 
    *ii=xctx->sel_array[first_sel].n;
+   if(xctx->inst[*ii].ptr < 0) return modified;
    *netl_com = 0;
    if ((xctx->inst[*ii].ptr + xctx->sym)->type!=NULL)
      *netl_com =
@@ -1801,10 +1807,10 @@ static int edit_symbol_property(int x, int first_sel)
      else if(x==2)    tcleval("viewdata $tctx::retval");
      my_strdup(_ALLOC_ID_, &result, tclresult());
    }
-   dbg(1, "edit_symbol_property(): before update_symbol, modified=%d\n", xctx->modified);
+   dbg(1, ("edit_symbol_property(): before update_symbol, modified=%d\n", xctx->modified));
    modified = update_symbol(result, x, *ii);
    my_free(_ALLOC_ID_, &result);
-   dbg(1, "edit_symbol_property(): done update_symbol, modified=%d\n", modified);
+   dbg(1, ("edit_symbol_property(): done update_symbol, modified=%d\n", modified));
    *ii=-1;
    return modified;
 }
@@ -1830,7 +1836,7 @@ void change_elem_order(int n)
       if(strcmp(tclgetvar("tctx::retval"),"") )
       {
         int c = 0;
-        xctx->push_undo();
+        xctx->push_undo(0);
         modified = 1;
         xctx->prep_hash_inst=0;
         xctx->prep_net_structs=0;
@@ -1844,7 +1850,7 @@ void change_elem_order(int n)
       }
     } else {
       new_n = n;
-      xctx->push_undo();
+      xctx->push_undo(0);
       modified = 1;
       xctx->prep_hash_inst=0;
       xctx->prep_net_structs=0;
@@ -1858,7 +1864,7 @@ void change_elem_order(int n)
       tmpinst=xctx->inst[new_n];
       xctx->inst[new_n]=xctx->inst[xctx->sel_array[0].n];
       xctx->inst[xctx->sel_array[0].n]=tmpinst;
-      dbg(1, "change_elem_order(): selected element %d\n", xctx->sel_array[0].n);
+      dbg(1, ("change_elem_order(): selected element %d\n", xctx->sel_array[0].n));
     }
     else if(xctx->sel_array[0].type==xRECT)
     {
@@ -1867,7 +1873,7 @@ void change_elem_order(int n)
       tmpbox=xctx->rect[c][new_n];
       xctx->rect[c][new_n]=xctx->rect[c][xctx->sel_array[0].n];
       xctx->rect[c][xctx->sel_array[0].n]=tmpbox;
-      dbg(1, "change_elem_order(): selected rect %d\n", xctx->sel_array[0].n);
+      dbg(1, ("change_elem_order(): selected rect %d\n", xctx->sel_array[0].n));
       if(c == GRIDLAYER) {
         if(xctx->graph_lastsel == new_n) xctx->graph_lastsel = xctx->sel_array[0].n;
         else if(xctx->graph_lastsel ==  xctx->sel_array[0].n) xctx->graph_lastsel = new_n;
@@ -1879,7 +1885,7 @@ void change_elem_order(int n)
       tmpwire=xctx->wire[new_n];
       xctx->wire[new_n]=xctx->wire[xctx->sel_array[0].n];
       xctx->wire[xctx->sel_array[0].n]=tmpwire;
-      dbg(1, "change_elem_order(): selected wire %d\n", xctx->sel_array[0].n);
+      dbg(1, ("change_elem_order(): selected wire %d\n", xctx->sel_array[0].n));
     }
     else if(xctx->sel_array[0].type==xTEXT)
     {
@@ -1887,7 +1893,7 @@ void change_elem_order(int n)
       tmptext=xctx->text[new_n];
       xctx->text[new_n]=xctx->text[xctx->sel_array[0].n];
       xctx->text[xctx->sel_array[0].n]=tmptext;
-      dbg(1, "change_elem_order(): selected text %d\n", xctx->sel_array[0].n);
+      dbg(1, ("change_elem_order(): selected text %d\n", xctx->sel_array[0].n));
     }
     xctx->need_reb_sel_arr = 1;
     if(modified) set_modify(1);
@@ -1914,13 +1920,13 @@ char *str_replace(const char *str, const char *rep, const char *with, int escape
   }
   rep_len = strlen(rep);
   with_len = strlen(with);
-  dbg(1, "str_replace(): %s, %s, %s\n", s, rep, with);
+  dbg(1, ("str_replace(): %s, %s, %s\n", s, rep, with));
   if( size == 0 ) {
     size = CADCHUNKALLOC;
     my_realloc(_ALLOC_ID_, &result, size);
   }
   while(*s) {
-    STR_ALLOC(&result, result_pos + with_len + 1, &size);
+    STR_ALLOC(_ALLOC_ID_, &result, result_pos + with_len + 1, &size);
 
     cond = (count == -1 || replacements < count)  &&
            ((s == str) || ((*(s - 1) != escape))) &&
@@ -1935,7 +1941,7 @@ char *str_replace(const char *str, const char *rep, const char *with, int escape
     }
   }
   result[result_pos] = '\0';
-  dbg(1, "str_replace(): returning %s\n", result);
+  dbg(1, ("str_replace(): returning %s\n", result));
   return result;
 }
 
@@ -1947,7 +1953,7 @@ char *str_chars_replace(const char *str, const char *replace_set, const char wit
   char *s;
   my_strdup(_ALLOC_ID_, &res, str);
   s = res;
-  dbg(1, "*str_chars_replace(): %s\n", res);
+  dbg(1, ("*str_chars_replace(): %s\n", res));
   while( *s) {
     if(strchr(replace_set, *s)) {
       *s = with;
@@ -2013,12 +2019,12 @@ void edit_property(int x)
      xctx->semaphore--;
    }
    else if(x==1) {
-      dbg(1, "edit_property(): executing edit_vi_prop\n");
+      dbg(1, ("edit_property(): executing edit_vi_prop\n"));
       tcleval("edit_vi_prop {Global schematic property:}");
    }
    else if(x==2)    tcleval("viewdata $tctx::retval");
-   dbg(1, "edit_property(): done executing edit_vi_prop, result=%s\n",tclresult());
-   dbg(1, "edit_property(): tctx::rcode=%s\n",tclgetvar("tctx::rcode") );
+   dbg(1, ("edit_property(): done executing edit_vi_prop, result=%s\n",tclresult()));
+   dbg(1, ("edit_property(): tctx::rcode=%s\n",tclgetvar("tctx::rcode") ));
 
    my_strdup(_ALLOC_ID_, &new_prop, (char *) tclgetvar("tctx::retval"));
    tclsetvar("tctx::retval", new_prop);
@@ -2029,38 +2035,38 @@ void edit_property(int x)
    {
      if(xctx->netlist_type==CAD_SYMBOL_ATTRS &&
         (!xctx->schsymbolprop || strcmp(xctx->schsymbolprop, tclgetvar("tctx::retval") ) ) ) {
-        xctx->push_undo();
+        xctx->push_undo(0);
         modified = 1;
         my_strdup(_ALLOC_ID_, &xctx->schsymbolprop, (char *) tclgetvar("tctx::retval"));
 
      } else if(xctx->netlist_type==CAD_VERILOG_NETLIST &&
         (!xctx->schverilogprop || strcmp(xctx->schverilogprop, tclgetvar("tctx::retval") ) ) ) {
         modified = 1;
-        xctx->push_undo();
+        xctx->push_undo(0);
         my_strdup(_ALLOC_ID_, &xctx->schverilogprop, (char *) tclgetvar("tctx::retval"));
 
      } else if(xctx->netlist_type==CAD_SPECTRE_NETLIST &&
         (!xctx->schspectreprop || strcmp(xctx->schspectreprop, tclgetvar("tctx::retval") ) ) ) {
         modified = 1;
-        xctx->push_undo();
+        xctx->push_undo(0);
         my_strdup(_ALLOC_ID_, &xctx->schspectreprop, (char *) tclgetvar("tctx::retval"));
 
      } else if(xctx->netlist_type==CAD_SPICE_NETLIST &&
         (!xctx->schprop || strcmp(xctx->schprop, tclgetvar("tctx::retval") ) ) ) {
         modified = 1;
-        xctx->push_undo();
+        xctx->push_undo(0);
         my_strdup(_ALLOC_ID_, &xctx->schprop, (char *) tclgetvar("tctx::retval"));
 
      } else if(xctx->netlist_type==CAD_TEDAX_NETLIST &&
         (!xctx->schtedaxprop || strcmp(xctx->schtedaxprop, tclgetvar("tctx::retval") ) ) ) {
         modified = 1;
-        xctx->push_undo();
+        xctx->push_undo(0);
         my_strdup(_ALLOC_ID_, &xctx->schtedaxprop, (char *) tclgetvar("tctx::retval"));
 
      } else if(xctx->netlist_type==CAD_VHDL_NETLIST &&
         (!xctx->schvhdlprop || strcmp(xctx->schvhdlprop, tclgetvar("tctx::retval") ) ) ) {
         modified = 1;
-        xctx->push_undo();
+        xctx->push_undo(0);
         my_strdup(_ALLOC_ID_, &xctx->schvhdlprop, (char *) tclgetvar("tctx::retval"));
      }
    }
@@ -2069,11 +2075,11 @@ void edit_property(int x)
    /* the xctx->schvhdlprop string. 04102001 */
    for(j=0;j<xctx->instances; ++j)
    {
-    if( xctx->inst[j].ptr !=-1 &&
+    if( xctx->inst[j].ptr >= 0 &&
         (xctx->inst[j].ptr+ xctx->sym)->type &&
         !strcmp( (xctx->inst[j].ptr+ xctx->sym)->type, "architecture") )
     {
-      dbg(1, "edit_property(): updating vhdl architecture\n");
+      dbg(1, ("edit_property(): updating vhdl architecture\n"));
       symbol_bbox(j, &xctx->inst[j].x1, &xctx->inst[j].y1,
                         &xctx->inst[j].x2, &xctx->inst[j].y2);
     }

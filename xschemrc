@@ -3,6 +3,9 @@
 # LibMan/WSL: ignore corrupted per-file sizes in ~/.xschem/geometry (e.g. 1x1)
 set initial_geometry {1300x950}
 
+# White schematic canvas (layer 0 of light_colors is #ffffff). Default is dark.
+set dark_colorscheme 0
+
 # ROOM is authoritative; payload/*.sch is Xschem editor cache (export on open, import on save).
 
 set ::XSCHEM_ROOT [file normalize [file dirname [info script]]]

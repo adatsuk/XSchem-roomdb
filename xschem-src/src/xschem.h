@@ -28,12 +28,12 @@
 
 #if HAS_PIPE == 1
 /* fdopen() */
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE  2 /* 200112L */
 #endif
 
 #if  HAS_POPEN==1
 /* popen() , pclose(), */
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE 2 /* 200112L */
 #endif
 
 #define TCL_WIDE_INT_TYPE long
@@ -145,7 +145,6 @@ extern char win_temp_dir[PATH_MAX];
 
 /* max number of windows (including main) a single xschem process can handle */
 #define MAX_NEW_WINDOWS 20
-#define WINDOW_PATH_SIZE 30
 
 #define BACKLAYER 0
 #define WIRELAYER 1
@@ -274,6 +273,8 @@ extern char win_temp_dir[PATH_MAX];
 #define BOXSIZE 400
 #define NBOXES 50
 
+/* first 2 slots (0, 1) are reserved. Undo will use slots from 2 and undo length is (MAX_UNDO - 2)
+ * never set to a value less than 3 */
 #define MAX_UNDO 80
 
 /* viewers xschem can generate plot commands for */
@@ -316,6 +317,14 @@ extern char win_temp_dir[PATH_MAX];
 #define XLOOKUP 1
 #define XDELETE 2
 #define XINSERT_NOREPLACE 3 /* do not replace token value in hash if already present */
+/* used in save_undo_table() */
+#define XDELETE_ALL 4
+#define XLIST 5
+#define XGET 6
+#define XASK_SAVE 7
+#define XREPLACE_WINPATH 8
+#define XDELETE_ALL_CURRENT_WIN 9 /* delete all entries belonging to current tab/window */
+#define XGET_SAVE_UNDO_PTR 10
 
 /* Cairo text flags (.flags field) */
 #define TEXT_BOLD 1
@@ -404,6 +413,8 @@ extern char win_temp_dir[PATH_MAX];
 /* coordinate transformations graph to screen */
 #define S_X(x) (gr->scx * (x) + gr->sdx)
 #define S_Y(y) (gr->scy * (y) + gr->sdy)
+#define SM_X(v) (gr->ssx0 + (v) * gr->ss)
+#define SM_Y(v) (gr->ssy0 - (v) * gr->ss)
 /* for digital waves */
 #define DS_Y(y) (gr->dscy * (y) + gr->dsdy)
 
@@ -416,12 +427,12 @@ extern char win_temp_dir[PATH_MAX];
 
 /* given a dest_string of size 'size', allocate space to make sure it can
  * hold 'add' characters */
-#define  STR_ALLOC(dest_string, add, size) \
+#define  STR_ALLOC(id, dest_string, add, size) \
 do { \
   register size_t __str_alloc_tmp__ = add; \
   if( __str_alloc_tmp__ >= *size) { \
     *size = __str_alloc_tmp__ + CADCHUNKALLOC; \
-    my_realloc(_ALLOC_ID_, dest_string, *size); \
+    my_realloc(id, dest_string, *size); \
   } \
 } while(0)
 
@@ -680,6 +691,8 @@ typedef struct
   char     *fptr; /* spectre global attr */
   char     *kptr;
   char     *eptr;
+  char *header_text;
+  char *version_string;
   int *lines;
   int *rects;
   int *polygons;
@@ -698,6 +711,17 @@ typedef struct
   xSymbol *symptr;
 } Undo_slot;
 
+typedef struct undo_save {
+  int head_undo_ptr;
+  int cur_undo_ptr;
+  int tail_undo_ptr;
+  int saved_cur_undo_ptr; /* copy of xctx->saved_cur_undo_ptr */
+  int modified;
+  char *undo_dirname; /* directory containing undo states */
+  Undo_slot *uslot; /* undo states when memory undo is used */
+  char *sch; /* full path of schematic */
+} undo_save;
+          
 typedef struct
 { /* used for symbols containing schematics as instances (LCC, Local Custom Cell) */
   double x0;
@@ -720,15 +744,13 @@ typedef struct {
 
 
 /* generic string hash table */
-
-typedef struct str_hashentry Str_hashentry;
-struct str_hashentry
+typedef struct str_hashentry
 {
   struct str_hashentry *next;
   unsigned int hash;
   char *token;
   char *value;
-};
+} Str_hashentry;
 
 typedef struct {
   Str_hashentry **table;
@@ -736,14 +758,13 @@ typedef struct {
 } Str_hashtable;
 
 /* generic int hash table */
-typedef struct int_hashentry Int_hashentry;
-struct int_hashentry
+typedef struct int_hashentry
 {
   struct int_hashentry *next;
   unsigned int hash;
   char *token;
   int value;
-};
+} Int_hashentry;
 
 typedef struct {
   Int_hashentry **table;
@@ -751,22 +772,20 @@ typedef struct {
 } Int_hashtable;
 
 /* generic pointer hash table */
-typedef struct ptr_hashentry Ptr_hashentry;
-struct ptr_hashentry
+typedef struct ptr_hashentry
 {
   struct ptr_hashentry *next;
   unsigned int hash;
   char *token;
   void *value;
-};
+} Ptr_hashentry;
 
 typedef struct {
   Ptr_hashentry **table;
   int size;
 } Ptr_hashtable;
 
-typedef struct node_hashentry Node_hashentry;
-struct node_hashentry
+typedef struct node_hashentry
 {
   struct node_hashentry *next;
   unsigned int hash;
@@ -777,11 +796,10 @@ struct node_hashentry
   char *class;
   char *orig_tok;
   Drivers d;
-};
+} Node_hashentry;
 
 
-typedef struct hilight_hashentry Hilight_hashentry;
-struct hilight_hashentry
+typedef struct hilight_hashentry
 {
   struct hilight_hashentry *next;
   unsigned int hash;
@@ -790,7 +808,7 @@ struct hilight_hashentry
   int oldvalue;  /* used for FF simulation */
   int value;  /* hilight color */
   int time; /*delta-time for sims */
-};
+} Hilight_hashentry;
 
 typedef struct {
   /* spice raw file specific data */
@@ -890,13 +908,15 @@ typedef struct {
   /* direct graph->screen transform */
   double scx, sdx, scy, sdy;
   double dscy, dsdy;
+  double ss, ssx0, ssy0;
+  double smith_z0;
   int divx, divy;
   int subdivx, subdivy;
   double magx, magy, maglegend;
   double unitx, unity;
   int unitx_suffix; /* 'n' or 'u' or 'M' or 'k' ... */
   int unity_suffix;
-  int mode; /* default:0   0:Line, 1:HistoV, 2:HistoH */
+  int mode; /* default:0   0:Line, 1:HistoV, 2:HistoH, 3:Smith */
   double txtsizelab, digtxtsizelab, txtsizey, txtsizex, txtsizelegend;
   int dataset;
   int hilight_wave; /* wave index */
@@ -1000,7 +1020,6 @@ typedef struct {
   #if HAS_CAIRO==1
   cairo_surface_t *cairo_sfc, *cairo_save_sfc;
   cairo_t *cairo_ctx, *cairo_save_ctx;
-  cairo_font_face_t *cairo_font;
   #endif
   GC gctiled;
   GC *gc;
@@ -1018,6 +1037,7 @@ typedef struct {
   int cur_undo_ptr;
   int tail_undo_ptr;
   int head_undo_ptr;
+  int saved_cur_undo_ptr; /* value of cur_undo_ptr when schematic was last saved */
   Int_hashtable inst_name_table;
   Int_hashtable floater_inst_table;
   Node_hashentry **node_table;
@@ -1105,9 +1125,8 @@ typedef struct {
   int edit_sym_i;
   int netlist_commands;
   /* in_memory_undo */
-  Undo_slot uslot[MAX_UNDO];
+  Undo_slot *uslot;
   int undo_initialized;
-  int mem_undo_initialized;
   /* graph context struct */
   Graph_ctx graph_struct;
 
@@ -1162,12 +1181,13 @@ typedef struct {
   /* top_path is the path prefix of drawing canvas (current_win_path):
    * top_path is always "" in tabbed interface 
    * current_win_path
-   *    canvas           top_path
-   *  ----------------------------
-   *    ".drw"            ""
-   *    ".x1.drw"         ".x1"
+   *    canvas           top_path           top_path
+   *                   multi window      tabbed interface
+   *  -----------------------------------------------------
+   *    ".drw"            ""                    ""
+   *    ".x1.drw"         ".x1"                 ""
    */
-  char *current_win_path; /* .drw or .x1.drw, .... ; always .drw in tabbed interface */
+  char *current_win_path; /* .drw or .x1.drw, .x2.drw .... (also in tabbed interface). */
   int *fill_type; /* for every layer: 0: no fill, 1, solid fill, 2: stipple fill */
   int fill_pattern;
   int draw_pixmap; /* pixmap used as 2nd buffer */
@@ -1176,8 +1196,9 @@ typedef struct {
   int do_copy_area;
   double cadhalfdotsize;
   time_t time_last_modify;
+  int warn_disk_file_modified;
   int undo_type; /* 0: on disk, 1: in memory */
-  void (*push_undo)(void);
+  void (*push_undo)(int);
   void (*pop_undo)(int, int);
   void (*delete_undo)(void);
   void (*clear_undo)(void);
@@ -1243,7 +1264,7 @@ extern char *xschem_executable;
 extern double tk_scaling;
 extern Tcl_Interp *interp;
 extern double *character[256];
-extern char old_win_path[PATH_MAX]; /* previously switched window, used in callback() */
+extern char *old_win_path; /* previously switched window, used in callback() */
 extern const char fopen_read_mode[]; /* "r" on unix, "rb" on windows */
 
 /*********** Cmdline options  (used at xinit, and then not used anymore) ***********/
@@ -1287,6 +1308,7 @@ extern int raw_read_from_attr(Raw **rawptr, const char *type, double sweep1, dou
 extern int raw_add_vector(const char *varname, const char *expr, int sweep_idx);
 extern int raw_renamevar(const char *old_name, const char *new_name);
 extern int raw_deletevar(const char *name);
+extern void allocate_raw_slots(void);
 extern int new_rawfile(const char *name, const char *type, const char *sweepvar,
                        double start, double end, double step);
 extern char *base64_from_file(const char *f, size_t *length);
@@ -1306,14 +1328,56 @@ extern int  get_raw_index(const char *node, Int_hashentry **entry_ret);
 extern void free_rawfile(Raw **rawptr, int dr, int no_warning);
 extern int update_op();
 extern int extra_rawfile(int what, const char *f, const char *type, double sweep1, double sweep2);
+extern int raw_copy(Raw **dest_raw, Raw *source_raw, Xschem_ctx *source);
+extern int extra_raw_arr_copy(Xschem_ctx *dest, Xschem_ctx *source);
 extern int raw_read(const char *f, Raw **rawptr, const char *type, int no_warning, double sweep1, double sweep2);
 extern int table_read(const char *f);
 extern double get_raw_value(int dataset, int idx, int point);
-extern int plot_raw_custom_data(int sweep_idx, int first, int last, const char *ntok, const char *yname);
+extern int plot_raw_custom_data(int sweep_idx, int first, int last, const char *expr, const char *yname, int ycol);
+extern int graph_sweep_expr_col(const char *sweep_attr, char **label_ret);
 extern int calc_custom_data_yrange(int sweep_idx, const char *express, Graph_ctx *gr);
 extern int sch_waves_loaded(void);
 extern int edit_wave_attributes(int what, int i, Graph_ctx *gr);
 extern void draw_graph(int i, int flags, Graph_ctx *gr, void *ct);
+/* Smith chart "label; expression" RPN program: a token sequence evaluated
+ * on a complex value stack (see smith_expr_parse()/
+ * smith_expr_eval_point()/draw_smith_expr_points() in draw.c) */
+#define SMX_MAX 128
+typedef enum { SMX_NUM, SMX_VAR, SMX_PLUS, SMX_MINUS, SMX_MULT, SMX_DIV, SMX_IMP } smx_type;
+typedef struct {
+  smx_type t;
+  double d; /* SMX_NUM value */
+  int idx;  /* SMX_VAR: raw base column index (% 4 == 0) */
+} smx_tok;
+typedef struct {
+  smx_tok tok[SMX_MAX];
+  int n;    /* number of valid tokens */
+} smx_prog;
+extern int smith_expr_parse(const char *expr, smx_prog *prog);
+extern int smith_expr_eval_point(const smx_prog *prog, int p, double z0, double *re, double *im);
+extern void draw_smith_points(int idx, int first, int last, XPoint *point,
+              int wave_color, int wcnt, int n_nodes, Graph_ctx *gr, GC ct);
+extern int draw_smith_expr_points(const smx_prog *prog, int first, int last, XPoint *point,
+              int wave_color, int wcnt, int n_nodes, Graph_ctx *gr, GC ct);
+/* Nearest plotted point on the Smith plane to (um, vm) [in Gamma units]:
+ * enumerates all waves of graph rect i (same wave-attribute parsing, per-wave
+ * raw override and validation as the draw path), all points of the selected
+ * dataset, skipping points with |Gamma| > 1.05 (outside the visible plane).
+ * Returns 0 and sets *freq_ret (sweep value, values[sweep_idx]), *wave_ret
+ * (0-based wave index) and *dset_ret (dataset index of the winning point) on
+ * success, or -1 if no plotted point. *freq_ret and *wave_ret are set to 0.0
+ * and -1 at entry, so they are defined on every failure path as well (i out
+ * of range, not a graph, no raw, not Smith mode, digital graph, no plotted
+ * point). dset_ret may be NULL; when non-NULL it is set to -1 at entry, so it
+ * is defined on every failure path as well. */
+extern int smith_closest_point(int i, double um, double vm, double *freq_ret, int *wave_ret, int *dset_ret);
+/* Screen-px positions of every wave's cursor marker at frequency f on the
+ * Smith plane of graph rect i: Gamma(f) linearly interpolated between the
+ * bracketing sweep points, coords CLIP(SM_X/SM_Y, -30000, 30000). Same wave
+ * enumeration, guards, per-wave raw switch/restore and validation as
+ * smith_closest_point(). Writes up to max_n (x, y) integer pairs to sx[]/sy[]
+ * and returns the number of markers written (extra waves ignored). */
+extern int smith_cursor_markers(int i, double f, int max_n, int *sx, int *sy);
 extern int find_closest_wave(int i, Graph_ctx *gr, int *node_number);
 extern void setup_graph_data(int i, int skip, Graph_ctx *gr);
 extern int graph_fullyzoom(xRect *r,  Graph_ctx *gr, int graph_dataset);
@@ -1327,7 +1391,35 @@ extern void create_plot_cmd(void);
 extern int set_modify(int mod); /* return number of floaters */
 extern int there_are_floaters(void);
 extern char *my_expand(const char *s, int tabstop) ;
-extern void dbg(int level, char *fmt, ...);
+
+/* undef -> define to debug memory allocations / free / reallocations */
+#undef DEBUG_MEM
+
+#ifndef DEBUG_MEM
+    #define dbgmem(level, args)
+#else
+
+    #define dbgmem(level, args) \
+        do { \
+             dbg_internal args; \
+        } while (0)
+#endif
+
+
+#if __OPTIMIZE__ == 1 || defined(DEBUG_MEM)
+    #define dbg(level, args)
+#else
+
+    #define dbg(level, args) \
+        do { \
+            if (debug_var >= (level)) { \
+                dbg_internal args; \
+            } \
+        } while (0)
+#endif
+
+extern void dbg_internal(char *fmt, ...);
+extern void info(char *fmt, ...);
 extern unsigned int hash_file(const char *f, int skip_path_lines);
 extern void here(double i);
 extern void print_version(void);
@@ -1341,8 +1433,8 @@ extern int copy_hierarchy_data(const char *from_win_path, const char *to_win_pat
 extern int schematic_in_new_window(int new_process, int dr, int force);
 extern void symbol_in_new_window(int new_process);
 extern void new_xschem_process(const char *cell, int symbol);
-extern void ask_new_file(int in_new_window, char *filename);
-extern void saveas(const char *f, int type);
+extern int ask_new_file(int in_new_window, char *filename);
+extern int saveas(const char *f, int type);
 extern const char *get_file_path(char *f);
 extern int save(int confirm, int fast);
 extern void save_ascii_string(const char *ptr, FILE *fd, int newline);
@@ -1423,8 +1515,8 @@ extern Selected select_object(double mx,double my, unsigned short sel_mode,
 extern int set_first_sel(unsigned short type, int n, unsigned int col);
 extern void unselect_all(int dr);
 extern void select_attached_nets(void);
-extern void select_inside(int stretch, double x1,double y1, double x2, double y2, int sel);
-extern void select_touch(double x1,double y1, double x2, double y2, int sel);
+extern void select_inside(int stretch, int itexts, double x1,double y1, double x2, double y2, int sel);
+extern void select_touch(int itexts, double x1,double y1, double x2, double y2, int sel);
 /*  Select all nets that are dangling, ie not attached to any non pin/port/probe components */
 extern int select_dangling_nets(void);
 extern void tclmainloop(void);
@@ -1493,6 +1585,8 @@ extern int textclip(int x1,int y1,int x2,int y2,
            double xa,double ya,double xb,double yb);
 extern double dist_from_rect(double mx,
               double my, double x1, double y1, double x2, double y2);
+extern double dist_from_element(double mx,
+              double my, double x1, double y1, double x2, double y2);
 extern double dist(double x1,double y1,double x2,double y2,double xa,double ya);
 extern double rectdist(double x1,double y1,double x2,double y2,double xa,double ya);
 extern int touch(double,double,double,double,double,double);
@@ -1528,12 +1622,14 @@ extern int verilog_block_netlist(FILE *fd, int i, int alert);
 extern int spice_block_netlist(FILE *fd, int i, int alert);
 extern int spectre_block_netlist(FILE *fd, int i, int alert);
 extern void remove_symbols(void);
-extern void remove_symbol(int i);
+extern void remove_symbol(int i, int shift);
+extern void free_symbol(xSymbol *sym);
 extern void clear_drawing(void);
 extern void get_sym_type(const char *symname, char **type,       
                          Int_hashtable *pintable, FILE *embed_fd, int *sym_n_pins);
 extern int is_from_web(const char *f);
-extern int load_sym_def(const char name[], FILE *embed_fd);
+extern void calc_symbol_bbox(int pos);
+extern int load_sym_def(const char name[], FILE *embed_fd, FILE *read_from);
 extern int descend_symbol(void);
 extern int place_symbol(int pos, const char *symbol_name, double x, double y, short rot, short flip,
                          const char *inst_props, int draw_sym, int first_call, int to_push_undo);
@@ -1548,13 +1644,19 @@ extern char *get_generator_command(const char *str);
 extern int match_symbol(const char name[]);
 extern Sch_pin_record *sort_schematic_pins(int *npins);
 extern int save_schematic(const char *, int fast); /*  20171020 added return value */
-extern void copy_symbol(xSymbol *dest_sym, xSymbol *src_sym);
-extern void push_undo(void);
+extern void copy_symbol_from_uslot(int i, xSymbol *dest_sym, const char *name, Undo_slot uslot);
+extern void copy_symbol(int i, xSymbol *dest_sym, xSymbol *src_sym);
+extern FILE *open_write_undo_file(const char *name, pid_t *pid_ptr);
+extern FILE *open_read_undo_file(const char *name, pid_t *pid_ptr);
+extern void close_undo_file(FILE *fd, pid_t pid);
+extern void push_undo(int);
 extern void pop_undo(int redo, int set_modify_status);
 extern void delete_undo(void);
 extern void clear_undo(void);
-extern void mem_push_undo(void);
+extern void mem_push_undo(int);
 extern void mem_pop_undo(int redo, int set_modify_status);
+extern void mem_copy_undo(Xschem_ctx *dest, Xschem_ctx *source);
+extern void mem_free_uslots(Undo_slot *uslot);
 extern void mem_delete_undo(void);
 extern void mem_clear_undo(void);
 extern int load_schematic(int load_symbol, const char *fname, int reset_undo, int alert);
@@ -1563,9 +1665,9 @@ extern int load_schematic_from_buffer(const char *data, size_t len, const char *
 extern char *export_schematic_to_buffer(size_t *out_len);
 /* check if filename already in an open window/tab */
 extern int get_tab_or_window_number(const char *win_path);
-extern void swap_tabs(void);
-extern void swap_windows(int dr);
-extern int check_loaded(const char *f, char *win_path);
+extern char *swap_tabs(void);
+extern char *swap_windows(int dr, char **geom);
+extern Xschem_ctx *check_loaded(Xschem_ctx *ctx, const char *f);
 extern char *get_last_created_window_path(void);
 extern int get_last_created_window(void);
 extern char *get_window_path(int i);
@@ -1584,6 +1686,7 @@ extern void get_additional_symbols(int what);
 extern int change_sch_path(int instnumber, int dr);
 extern int descend_schematic(int instnumber, int fallback, int alert, int set_title);
 extern void go_back(int what); /* what == 1: confirm save; what == 2: do not reset window title */
+extern void set_unique_sch_name(Xschem_ctx *ctx, const char *name);
 extern void clear_schematic(int cancel, int symbol);
 extern void view_unzoom(double z);
 extern void view_zoom(double z);
@@ -1643,29 +1746,39 @@ extern Objectentry *object_iterator_next(Iterator_ctx *ctx);
 extern void check_unique_names(int rename);
 
 extern unsigned int str_hash(const char *tok);
+
+extern void str_hash_init(Str_hashtable *hashtable, int size);
 extern void str_hash_free(Str_hashtable *hashtable);
 extern Str_hashentry *str_hash_lookup(Str_hashtable *hashtable,
        const char *token, const char *value, int what);
-extern void str_hash_init(Str_hashtable *hashtable, int size);
+extern int str_hash_copy(Str_hashtable *dest, Str_hashtable *source);
+
 extern void int_hash_init(Int_hashtable *hashtable, int size);
 extern void int_hash_free(Int_hashtable *hashtable);
 extern Int_hashentry *int_hash_lookup(Int_hashtable *hashtable,
        const char *token, const int value, int what);
+extern int int_hash_copy(Int_hashtable *dest, Int_hashtable *source);
+
 extern void ptr_hash_init(Ptr_hashtable *hashtable, int size);
-extern void ptr_hash_free(Ptr_hashtable *hashtable);
+extern void ptr_hash_free(Ptr_hashtable *hashtable, void(*freefunc)(void **));
 extern Ptr_hashentry *ptr_hash_lookup(Ptr_hashtable *hashtable,
        const char *token,  void * const value, int what);
+extern int ptr_hash_copy(Ptr_hashtable *dest, Ptr_hashtable *source);
+
 extern char *trim_chars(const char *str, const char *sep);
+extern ssize_t find_unescaped_sep(const char *str, const char *sep, const char *quotechar, int n);
 extern char *find_nth(const char *str, const char *sep, const char *quote, int keep_quote, int n);
 extern int isonlydigit(const char *s);
 extern char *spice_get_node(const char *token);
 extern char *get_fqdevice(const char *param, int modelparam, const char *instname);
+extern char *recursive_subst(const char *value, int symbol);
 extern const char *translate(int inst, const char* s, char **result);
 extern const char* translate2(Lcc *lcc, int level, char* s, char **result);
-extern const char *translate3(const char* s, int eat_escapes, const char *s1,
+extern const char *translate3(const char* s, int inst, int eat_escapes, const char *s1,
                               const char *s2, const char *s3, const char *s4, char **translated_tok);
 extern void print_tedax_element(FILE *fd, int inst);
 extern int print_spice_element(FILE *fd, int inst);
+extern int has_included_subcircuit(int inst, int symbol, char **result);
 extern void print_spice_subckt_nodes(FILE *fd, int symbol);
 extern int print_spectre_element(FILE *fd, int inst);
 extern void print_spectre_subckt_nodes(FILE *fd, int symbol);
@@ -1682,6 +1795,7 @@ extern size_t my_strdup2(int id, char **dest, const char *src);
 extern char *my_fgets(FILE *fd, size_t *line_len);
 extern size_t my_fgets_skip(FILE *fd);
 extern char *my_strtok_r(char *str, const char *delim, const char *quote, int keep_quote, char **saveptr);
+extern int save_undo_table(const char *sch_name, void *ptr, int what);
 extern char **parse_cmd_string(const char *cmd, int *argc);
 extern int my_strncpy(char *d, const char *s, size_t n);
 extern int my_strcasecmp(const char *s1, const char *s2);
@@ -1736,6 +1850,7 @@ extern void check_polygon_storage(int c);
 extern void eval_expr_init_table(void);
 extern void eval_expr_clear_table(void);
 extern char *eval_expr(const char *s);
+extern const char *is_expr(const char *str);
 extern const char *expandlabel(const char *s, int *m);
 extern void parse(const char *s);
 extern void clear_expandlabel_data(void);
@@ -1752,6 +1867,7 @@ extern int record_global_node(int what, FILE *fp, const char *node);
 extern int count_items(const char *s, const char *sep, const char *quote);
 extern int get_unnamed_node(int what, int mult, int node);
 extern void node_hash_free(void);
+extern int node_hash_copy(Xschem_ctx *dest, Xschem_ctx *source);
 extern int traverse_node_hash();
 extern Node_hashentry
                 *bus_node_hash_lookup(const char *token, const char *dir,int what, int port, char *sig_type,
@@ -1773,9 +1889,10 @@ extern void  select_connected_nets(int stop_at_junction);
 extern char *resolved_net(const char *net);
 extern void draw_hilight_net(int on_window);
 extern void copy_hilights(void);
+extern int hilight_hash_copy(Xschem_ctx *dest, Xschem_ctx *source);
 extern void display_hilights(int what, char **str);
 extern void redraw_hilights(int clear);
-extern void set_tcl_netlist_type(void);
+extern void set_tcl_netlist_type(Xschem_ctx *ctx);
 extern void show_unconnected_pins(void);
 extern void auto_set_wire_bus(int start, int end);
 extern int prepare_netlist_structs(int for_netlist);
@@ -1785,6 +1902,8 @@ extern int shorted_instance(int i, int lvs_ignore);
 extern int compare_schematics(const char *filename);
 extern void create_gc(void);
 extern void free_gc(void);
+extern void alloc_xschem_data(const char *top_path, const char *win_path);
+extern void free_xschem_data();
 extern void init_pixdata();
 extern int warning_overlapped_symbols(int sel);
 extern void free_simdata(void);
@@ -1807,6 +1926,9 @@ extern void list_hilights(int all);
 extern void change_layer();
 extern void launcher();
 extern void windowid(const char *win_path);
+extern void sch_deep_copy(Xschem_ctx *dest, Xschem_ctx *source, const char *sch_name, int flags);
+extern int fork_sch(int what, const char *sch_name, int flags, int dbglev);
+extern void delete_schematic_data(int delete_pixmap);
 extern int preview_window(const char *what, const char *tk_win_path, const char *fname);
 extern int new_schematic(const char *what, const char *win_path, const char *fname, int dr);
 extern void toggle_fullscreen(const char *topwin);
@@ -1817,7 +1939,7 @@ extern void set_clip_mask(int what);
 extern int pending_events(void);
 #endif
 extern void get_square(double x, double y, int *xx, int *yy);
-extern const char *create_tmpdir(char *prefix);
+extern const char *create_tmpdir(const char *prefix, const char *prefix2);
 extern FILE *open_tmpfile(char *prefix, char *suffix, char **filename);
 extern void create_ps(char** psfile, int what, int fullzoom, int eps);
 extern void MyXCopyArea(Display* display, Drawable src, Drawable dest, GC gc, int src_x, int src_y, unsigned int width, unsigned int height, int dest_x, int dest_y);

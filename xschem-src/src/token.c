@@ -70,11 +70,11 @@ const char *tcl_hook2(const char *cmd)
     my_strdup2(_ALLOC_ID_, &unescaped_res, str_replace(cmd, "\\}", "}", 0, -1));
     tclvareval("tclpropeval2 {", unescaped_res, "}" , NULL);
     my_free(_ALLOC_ID_, &unescaped_res);
-    dbg(1, "tcl_hook2: tclresult()=%s\n", tclresult());
+    dbg(1, ("tcl_hook2: tclresult()=%s\n", tclresult()));
     my_strdup2(_ALLOC_ID_, &result, tclresult());
-    dbg(1, "tcl_hook2: return 1: %s\n", result);
+    dbg(1, ("tcl_hook2: return 1: %s\n", result));
   } else {
-    dbg(1, "tcl_hook2: return 2: %s\n", cmd); 
+    dbg(1, ("tcl_hook2: return 2: %s\n", cmd)); 
     my_strdup2(_ALLOC_ID_, &result, cmd);
   }
   return result;
@@ -98,7 +98,7 @@ int is_generator(const char *name)
     regcomp(re, "^[^ \t()]+\\([^()]*\\)[ \t]*$", REG_NOSUB | REG_EXTENDED);
   }
   if(!regexec(re, name, 0 , NULL, 0) ) res = 1;
-  dbg(1, "is_generator(%s)=%d\n", name, res);
+  dbg(1, ("is_generator(%s)=%d\n", name, res));
   /* regfree(&re); */
   return res;
   #else
@@ -127,11 +127,11 @@ const char *sanitize(const char *name)
     my_free(_ALLOC_ID_, &s);
     return empty;
   }
-  dbg(1, "sanitize(): name=%s\n", name);
+  dbg(1, ("sanitize(): name=%s\n", name));
   tclvareval("regsub -all { *[.(),] *} {", name, "} _", NULL);
   tclvareval("regsub  {_$} {", tclresult(), "} {}", NULL);
   my_strdup2(_ALLOC_ID_, &s, tclresult());
-  dbg(1, "sanitize(): s=%s\n", s);
+  dbg(1, ("sanitize(): s=%s\n", s));
   return s;
 }
 
@@ -146,7 +146,7 @@ char *get_generator_command(const char *str)
   char *spc_idx;
   struct stat buf;
 
-  dbg(1, "get_generator_command(): symgen=%s\n",str);
+  dbg(1, ("get_generator_command(): symgen=%s\n",str));
   cmd = str_chars_replace(str, " (),", ' '); /* transform str="xxx(a,b,c)" into cmd="xxx a b c" */
   spc_idx = strchr(cmd, ' ');
   if(!spc_idx) {
@@ -172,9 +172,9 @@ char *get_generator_command(const char *str)
   gen_cmd = my_malloc(_ALLOC_ID_, len * sizeof(char));
   my_snprintf(gen_cmd, len, "tclsh \"%s\"%s", cmd_filename, spc_idx);
   #endif
-  dbg(1, "get_generator_command(): cmd_filename=%s\n", cmd_filename);
-  dbg(1, "get_generator_command(): gen_cmd=%s\n", gen_cmd);
-  dbg(1, "get_generator_command(): is_generator=%d\n", is_generator(str));
+  dbg(1, ("get_generator_command(): cmd_filename=%s\n", cmd_filename));
+  dbg(1, ("get_generator_command(): gen_cmd=%s\n", gen_cmd));
+  dbg(1, ("get_generator_command(): is_generator=%d\n", is_generator(str)));
 
   end:
   my_free(_ALLOC_ID_, &cmd);
@@ -186,20 +186,59 @@ int match_symbol(const char *name)  /* never returns -1, if symbol not found loa
   int i,found;
 
   found=0;
-  dbg(1, "match_symbol(): name=%s\n", name);
+  dbg(1, ("match_symbol(): name=%s\n", name));
   for(i=0;i<xctx->symbols; ++i) {
     /* dbg(1, "match_symbol(): name=%s, sym[i].name=%s\n",name, xctx->sym[i].name);*/
     if(xctx->x_strcmp(name, xctx->sym[i].name) == 0)
     {
-      dbg(1, "match_symbol(): found matching symbol:%s\n",name);
+      dbg(1, ("match_symbol(): found matching symbol:%s\n",name));
       found=1;break;
     }
   }
   if(!found) {
-    dbg(1, "match_symbol(): matching symbol not found: loading %s\n", name);
-    load_sym_def(name, NULL); /* append another symbol to the xctx->sym[] array */
+    int undo_found = 0, mem_undo_found = 0;
+    char *undo_dirname = NULL;
+    FILE *fd = NULL;
+    pid_t pid;
+    struct stat buf;
+    dbg(1, ("match_symbol(): matching symbol not found: loading %s\n", name));
+
+    /* if a symbol has been edited, preserve_undo is set and
+     * undo_type==0 (disk undo) read symbol data from <undo_dirname>/undo0 */
+    if(xctx->undo_type == 0 && tclgetboolvar("preserve_undo")) { /* disk undo  and preserve_undo */
+      undo_found = save_undo_table(name, &undo_dirname, XLOOKUP);
+      if(undo_found) {
+        my_mstrcat(_ALLOC_ID_, &undo_dirname, "/undo0", NULL);
+        dbg(1, ("undo_dirname=%s\n", undo_dirname));
+        if(stat(undo_dirname, &buf)) {
+          /* entry found in save_undo_table, but file not existing */
+          undo_found = 0;
+        } else {
+          fd = open_read_undo_file(undo_dirname, &pid);
+        }
+      }
+    }
+
+    if(xctx->undo_type == 1 && tclgetboolvar("preserve_undo")) {
+      Undo_slot *uslot = NULL;
+      mem_undo_found = save_undo_table(name, &uslot, XLOOKUP);
+      if(mem_undo_found) {
+        check_symbol_storage();
+        memset(&xctx->sym[xctx->symbols], 0, sizeof(xSymbol));
+        dbg(1, ("match_symbol: get from memory undo uslot[0]: %s\n", name));
+        copy_symbol_from_uslot(xctx->symbols, &xctx->sym[xctx->symbols], name, uslot[0]);
+        xctx->symbols++;
+      }
+    }
+
+    if(!mem_undo_found) {
+      load_sym_def(name, NULL, fd); /* append another symbol to the xctx->sym[] array */
+    }
+
+    if(fd) close_undo_file(fd, pid);
+    if(undo_dirname) my_free(_ALLOC_ID_, &undo_dirname);
   }
-  dbg(1, "match_symbol(): returning %d\n",i);
+  dbg(1, ("match_symbol(): returning %d\n",i));
   return i;
 }
 
@@ -219,7 +258,7 @@ int set_different_token(char **s,const char *new, const char *old)
 
  mod=0;
  my_new = new;
- dbg(1, "set_different_token(): *s=%s, new=%s, old=%s\n",*s, new, old);
+ dbg(1, ("set_different_token(): *s=%s, new=%s, old=%s\n",*s, new, old));
  if(new==NULL) return 0;
 
  sizeval = sizetok = CADCHUNKALLOC;
@@ -236,8 +275,8 @@ int set_different_token(char **s,const char *new, const char *old)
   else if( (state==TOK_TOKEN || state==TOK_ENDTOK) && c=='=') state=TOK_SEP;
   else if( state==TOK_SEP && !space) state=TOK_VALUE;
   else if( state==TOK_VALUE && space && !quote && !escape) state=TOK_END;
-  STR_ALLOC(&value, value_pos, &sizeval);
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &value, value_pos, &sizeval);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) token[token_pos++]=(char)c;
   else if(state==TOK_VALUE) {
    value[value_pos++]=(char)c;
@@ -273,8 +312,8 @@ int set_different_token(char **s,const char *new, const char *old)
   else if( (state==TOK_TOKEN || state==TOK_ENDTOK) && c=='=') state=TOK_SEP;
   else if( state==TOK_SEP && !space) state=TOK_VALUE;
   else if( state==TOK_VALUE && space && !quote && !escape) state=TOK_END;
-  STR_ALLOC(&value, value_pos, &sizeval);
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &value, value_pos, &sizeval);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) token[token_pos++]=(char)c;
   else if(state==TOK_VALUE) {
    value[value_pos++]=(char)c;
@@ -332,7 +371,7 @@ const char *list_tokens(const char *s, int with_quotes)
     else if( (state==TOK_TOKEN || state==TOK_ENDTOK) && c=='=') state=TOK_SEP;
     else if( state==TOK_SEP && !space) state=TOK_VALUE;
     else if( state==TOK_VALUE && space && !quote && !escape ) state=TOK_END;
-    STR_ALLOC(&token, token_pos, &sizetok);
+    STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
     if(c=='"') {
       if(!escape) quote=!quote;
     }
@@ -417,9 +456,9 @@ static void get_pin_and_attr(const char *token, char **pin_num_or_name, char **p
     my_strdup2(_ALLOC_ID_, pin_num_or_name, token + 2);
     my_strdup2(_ALLOC_ID_, pin_attr, "");
   }
-  dbg(1, "get_pin_and_attr(): token=%s, name=%s, attr=%s\n", token,
+  dbg(1, ("get_pin_and_attr(): token=%s, name=%s, attr=%s\n", token,
       *pin_num_or_name ? *pin_num_or_name : "<NULL>",
-      *pin_attr ? *pin_attr: "<NULL>");
+      *pin_attr ? *pin_attr: "<NULL>"));
 }
 
 /* state machine that parses a string made up of <token>=<value> ... */
@@ -458,12 +497,11 @@ const char *get_tok_value(const char *s,const char *tok, int with_quotes)
       my_free(_ALLOC_ID_, &token);
       my_free(_ALLOC_ID_, &translated_tok);
       size = sizetok = 0;
-      dbg(2, "get_tok_value(): clear static data\n");
+      dbg(2, ("get_tok_value(): clear static data\n"));
     }
     return "";
   }
   if(!tok || !strstr(s, tok)) return "";
-  /* dbg(0, "get_tok_value(): looking for <%s> in <%.30s>\n",tok,s); */
   if( size == 0 ) {
     sizetok = size = CADCHUNKALLOC;
     my_realloc(_ALLOC_ID_, &result, size);
@@ -477,7 +515,7 @@ const char *get_tok_value(const char *s,const char *tok, int with_quotes)
     else if( (state==TOK_TOKEN || state==TOK_ENDTOK) && c=='=') state=TOK_SEP;
     else if( state==TOK_SEP && !space) state=TOK_VALUE;
     else if( state==TOK_VALUE && space && !quote && !escape ) state=TOK_END;
-    /* don't use STR_ALLOC() for efficiency reasons */
+    /* don't use STR_ALLOC(_ALLOC_ID_, ) for efficiency reasons */
     if(value_pos>=size) {
       size+=CADCHUNKALLOC;
       my_realloc(_ALLOC_ID_, &result,size);
@@ -555,13 +593,13 @@ const char *get_sym_template(char *s,char *extra)
 /* 2: eat backslashes */
 /* 3: 1+2  :) */
 
- dbg(1, "get_sym_template(): s=%s, extra=%s\n", s ? s : "<NULL>", extra ? extra : "<NULL>");
+ dbg(1, ("get_sym_template(): s=%s, extra=%s\n", s ? s : "<NULL>", extra ? extra : "<NULL>"));
  if(s==NULL) {
    my_free(_ALLOC_ID_, &result);
    return "";
  }
  l = strlen(s);
- STR_ALLOC(&result, l+1, &sizeres);
+ STR_ALLOC(_ALLOC_ID_, &result, l+1, &sizeres);
  result[0] = '\0';
  sizetok = sizeval = CADCHUNKALLOC;
  my_realloc(_ALLOC_ID_, &value,sizeval);
@@ -569,15 +607,15 @@ const char *get_sym_template(char *s,char *extra)
  while(1) {
   c=*s++;
   space=SPACE(c) ;
-  dbg(1, "state=%d", state);
+  dbg(1, ("state=%d", state));
   if( (state==TOK_BEGIN || state==TOK_ENDTOK) && !space && c != '=') state=TOK_TOKEN;
   else if( state==TOK_TOKEN && space) state=TOK_ENDTOK;
   else if( (state==TOK_TOKEN || state==TOK_ENDTOK) && c=='=') state=TOK_SEP;
   else if( state==TOK_SEP && !space) state=TOK_VALUE;
   else if( state==TOK_VALUE && space && !quote) state=TOK_END;
-  dbg(1, " --> state=%d\n", state);
-  STR_ALLOC(&value, value_pos, &sizeval);
-  STR_ALLOC(&token, token_pos, &sizetok);
+  dbg(1, (" --> state=%d\n", state));
+  STR_ALLOC(_ALLOC_ID_, &value, value_pos, &sizeval);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(c=='"') {
     if(!escape) quote=!quote;
   }
@@ -603,7 +641,7 @@ const char *get_sym_template(char *s,char *extra)
   } else if(state==TOK_ENDTOK || state==TOK_SEP) {
     if(token_pos) {
       token[token_pos]='\0';
-      dbg(1, "token=|%s|\n", token);
+      dbg(1, ("token=|%s|\n", token));
       if((!extra || !strstr(extra, token)) && strcmp(token,"name") &&
         strcmp(token,"spiceprefix") && strcmp(token,"model")) {
         memcpy(result+result_pos, token, token_pos+1);
@@ -621,7 +659,7 @@ const char *get_sym_template(char *s,char *extra)
  }
  my_free(_ALLOC_ID_, &value);
  my_free(_ALLOC_ID_, &token);
- dbg(1, "get_sym_template(): result=|%s|\n", result);
+ dbg(1, ("get_sym_template(): result=|%s|\n", result));
  return result;
 }
 
@@ -636,7 +674,7 @@ static char *get_pin_attr_from_inst(int inst, int pin, const char *attr)
    const char *str;
 
 
-   dbg(1, "get_pin_attr_from_inst(): inst=%d pin=%d attr=%s\n", inst, pin, attr);
+   dbg(1, ("get_pin_attr_from_inst(): inst=%d pin=%d attr=%s\n", inst, pin, attr));
    if(xctx->inst[inst].ptr < 0 ) return NULL;
    pin_attr_value = NULL;
    str = get_tok_value(xctx->sym[xctx->inst[inst].ptr].rect[PINLAYER][pin].prop_ptr,"name",0);
@@ -655,7 +693,7 @@ static char *get_pin_attr_from_inst(int inst, int pin, const char *attr)
        pnumber = my_malloc(_ALLOC_ID_, attr_size + 100);
        my_snprintf(pnumber, attr_size + 100, "%s(%d)", attr, pin);
        str = get_tok_value(xctx->inst[inst].prop_ptr, pnumber, 0);
-       dbg(1, "get_pin_attr_from_inst(): pnumber=%s\n", pnumber);
+       dbg(1, ("get_pin_attr_from_inst(): pnumber=%s\n", pnumber));
        my_free(_ALLOC_ID_, &pnumber);
        if(xctx->tok_size) my_strdup2(_ALLOC_ID_, &pin_attr_value, str);
      }
@@ -683,7 +721,7 @@ void hash_names(int inst, int action)
   int i, start, stop;
   char *upinst = NULL;
   char *upinst_ptr, *upinst_state, *single_name;
-  dbg(1, "hash_names(): inst=%d, action=%d\n", inst, action);
+  dbg(1, ("hash_names(): inst=%d, action=%d\n", inst, action));
   if(inst == -1) {
     int_hash_free(&xctx->inst_name_table);
     int_hash_init(&xctx->inst_name_table, HASHSIZE);
@@ -695,8 +733,8 @@ void hash_names(int inst, int action)
     start = inst;
     stop = inst + 1;
   }
-  if(inst != -1) dbg(1, "hash_names(): start=%d, stop=%d, instname=%s\n",
-        start, stop, xctx->inst[inst].instname? xctx->inst[inst].instname : "<NULL>");
+  if(inst != -1) dbg(1, ("hash_names(): start=%d, stop=%d, instname=%s\n",
+        start, stop, xctx->inst[inst].instname? xctx->inst[inst].instname : "<NULL>"));
   for(i = start; i < stop; ++i) {
     if(xctx->inst[i].instname && xctx->inst[i].instname[0]) {
       my_strdup(_ALLOC_ID_, &upinst, expandlabel(xctx->inst[i].instname, NULL));
@@ -705,9 +743,9 @@ void hash_names(int inst, int action)
       upinst_ptr = upinst;
       while( (single_name = my_strtok_r(upinst_ptr, ",", "", 0, &upinst_state)) ) {
         upinst_ptr = NULL;
-        dbg(1, "hash_names(): inst %d, name %s --> %d\n", i, single_name, action);
+        dbg(1, ("hash_names(): inst %d, name %s --> %d\n", i, single_name, action));
         int_hash_lookup(&xctx->inst_name_table, single_name, i, action);
-        dbg(1, "hash_names(): hashing %s from %s\n", single_name, xctx->inst[i].instname);
+        dbg(1, ("hash_names(): hashing %s from %s\n", single_name, xctx->inst[i].instname));
       }
     }
   }
@@ -740,7 +778,7 @@ static int name_is_used(char *name, const char *old_basename, const char *brkt, 
     }
   }
   my_free(_ALLOC_ID_, &upinst);
-  dbg(1, "name_is_used(%s): return inst %d\n", name, used);
+  dbg(1, ("name_is_used(%s): return inst %d\n", name, used));
 
   if(q != -1 && used == -1) {
     size_t size = strlen(old_basename) + strlen(brkt)+40;
@@ -770,7 +808,7 @@ void new_prop_string(int i, const char *old_prop, int dis_uniq_names)
   char *up_new_name = NULL;
   int is_used;
 
-  dbg(1, "new_prop_string(): i=%d, old_prop=%s\n", i, old_prop);
+  dbg(1, ("new_prop_string(): i=%d, old_prop=%s\n", i, old_prop));
   if(old_prop==NULL) {
    my_free(_ALLOC_ID_, &xctx->inst[i].prop_ptr);
    return;
@@ -806,10 +844,10 @@ void new_prop_string(int i, const char *old_prop, int dis_uniq_names)
     if(is_used == -1 ) break;
   }
   my_free(_ALLOC_ID_, &old_name_base);
-  dbg(1, "new_prop_string(): new_name=%s\n", new_name);
+  dbg(1, ("new_prop_string(): new_name=%s\n", new_name));
   new_prop = subst_token(old_prop, "name", new_name);
-  dbg(1, "new_prop_string(): old_prop=|%s|\n", old_prop);
-  dbg(1, "new_prop_string(): new_prop=|%s|\n", new_prop);
+  dbg(1, ("new_prop_string(): old_prop=|%s|\n", old_prop));
+  dbg(1, ("new_prop_string(): new_prop=|%s|\n", new_prop));
   if(strcmp(new_prop, old_prop) ) {
     my_strdup(_ALLOC_ID_, &xctx->inst[i].prop_ptr, new_prop);
     my_strdup2(_ALLOC_ID_, &xctx->inst[i].instname, new_name);
@@ -822,7 +860,6 @@ void new_prop_string(int i, const char *old_prop, int dis_uniq_names)
 void check_unique_names(int rename)
 {
   int i, first = 1, modified = 0;
-  int newpropcnt = 0;
   char *tmp = NULL;
   int used;
 
@@ -843,14 +880,14 @@ void check_unique_names(int rename)
       used = name_is_used(xctx->inst[i].instname,"", "", -1);
       hash_names(i, XINSERT_NOREPLACE);
       if( used != -1 && used != i) {
-        dbg(0, "check_unique_names(): found duplicate: i=%d name=%s\n", i, xctx->inst[i].instname);
+        info("check_unique_names(): found duplicate: i=%d name=%s\n", i, xctx->inst[i].instname);
         xctx->inst[i].color = -PINLAYER;
         inst_hilight_hash_lookup(i, -PINLAYER, XINSERT_NOREPLACE);
         if(rename == 1) {
           if(first) {
             bbox(START,0.0,0.0,0.0,0.0);
             modified = 1;
-            xctx->push_undo();
+            xctx->push_undo(0);
             xctx->prep_hash_inst=0;
             xctx->prep_net_structs=0;
             xctx->prep_hi_structs=0;
@@ -866,7 +903,6 @@ void check_unique_names(int rename)
   if(rename) for(i=0;i<xctx->instances; ++i) {
     if( (xctx->inst[i].color != -10000)) {
       my_strdup(_ALLOC_ID_, &tmp, xctx->inst[i].prop_ptr);
-      newpropcnt++;
       new_prop_string(i, tmp, 0);
       hash_names(i, XINSERT);
       symbol_bbox(i, &xctx->inst[i].x1, &xctx->inst[i].y1, &xctx->inst[i].x2, &xctx->inst[i].y2);
@@ -925,9 +961,9 @@ int xis_quoted(const char *s)
 }
 
 
-char *is_expr(const char *str)
+const char *is_expr(const char *str)
 {
-  char *ret = NULL;
+  const char *ret = NULL;
   if(str) {
     ret = strstr(str, "expr(");
     if(!ret) ret = strstr(str, "expr_eng(");
@@ -974,7 +1010,7 @@ static void print_vhdl_primitive(FILE *fd, int inst) /* netlist  primitives, 200
  }
  no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
  s=format;
- dbg(1, "print_vhdl_primitive(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count);
+ dbg(1, ("print_vhdl_primitive(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count));
 
  fprintf(fd, "---- start primitive ");
  expandlabel(name, &tmp);
@@ -1001,7 +1037,7 @@ static void print_vhdl_primitive(FILE *fd, int inst) /* netlist  primitives, 200
     state=TOK_SEP;
   }
 
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) {
     token[token_pos++]=(char)c; /* 20171029 remove escaping backslashes */
   }
@@ -1043,16 +1079,24 @@ static void print_vhdl_primitive(FILE *fd, int inst) /* netlist  primitives, 200
                                         /* in hash table */
    {
      char *res = NULL;
-     const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res));
+     const char *s;
+     char *gsn = NULL;
+     my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 0, 0));
+     s = sanitize(translate(inst, gsn, &res));
      my_mstrcat(_ALLOC_ID_, &result, s, NULL);
      my_free(_ALLOC_ID_, &res);
+     my_free(_ALLOC_ID_, &gsn);
    }
    else if (strcmp(token,"@symname_ext")==0)
    {
      char *res = NULL;
-     const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 1, 0), &res));
+     const char *s;
+     char *gsn = NULL;
+     my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 1, 0));
+     s = sanitize(translate(inst, gsn, &res));
      my_mstrcat(_ALLOC_ID_, &result, s, NULL);
      my_free(_ALLOC_ID_, &res);
+     my_free(_ALLOC_ID_, &gsn);
    }
    else if(strcmp(token,"@schname_ext")==0) /* of course schname must not be present  */
                                         /* in hash table */
@@ -1062,6 +1106,10 @@ static void print_vhdl_primitive(FILE *fd, int inst) /* netlist  primitives, 200
    else if(strcmp(token,"@schname")==0)
    {
      my_mstrcat(_ALLOC_ID_, &result, get_cell(xctx->current_name, 0), NULL);
+   }
+   else if(strcmp(token,"@index")==0)
+   {
+     my_mstrcat(_ALLOC_ID_, &result, my_itoa(inst), NULL);
    }
    else if(strcmp(token,"@topschname")==0) /* of course topschname must not be present in attributes */
    {
@@ -1203,28 +1251,26 @@ static void print_vhdl_primitive(FILE *fd, int inst) /* netlist  primitives, 200
     /* if result is like: 'tcleval(some_string)' pass it thru tcl evaluation so expressions
      * can be calculated. Before that do also a round of translation to remove remaining @params */
     if(result) {
-      dbg(1, "print_vhdl_primitive(): before translate3() result=%s\n", result);
-      if(strchr(result, '@')) {
+      dbg(1, ("print_vhdl_primitive(): before translate3() result=%s\n", result));
+      if(strpbrk(result, "@%")) {
         /* netlist_commands often have @ characters due to ngspice syntax. Do not translate */
         if(strcmp(xctx->sym[xctx->inst[inst].ptr].type, "netlist_commands")) {
           char *res = NULL;
           my_strdup2(_ALLOC_ID_, &result,
-            translate3(result, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, NULL, NULL, &res));
+            translate3(result, inst, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, NULL, NULL, &res));
           /* can not put template in above translate3: -----------------------^^^^
            * if instance has VHI=VHI, format string has VHI=@VHI, and symbol template has VHI=3
            * we do not want token @VHI to resolve to 3, but stop at VHI as specified in instance */
-          if(strchr(result, '@')) {
+          if(strpbrk(result, "@%")) {
              my_strdup2(_ALLOC_ID_, &result,
-                translate3(result, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
+                translate3(result, inst, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
           }
           my_free(_ALLOC_ID_, &res);
         }
       }
       my_strdup2(_ALLOC_ID_, &result, tcl_hook2(result)); /* tcl evaluation if tcleval(....) */
-      if(is_expr(result)) {
-        my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
-      }
-      dbg(1, "print_vhdl_primitive(): after  translate3() result=%s\n", result);
+      my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
+      dbg(1, ("print_vhdl_primitive(): after  translate3() result=%s\n", result));
     }
     if(result) fprintf(fd, "%s", result);
     fputc('\n',fd);
@@ -1283,7 +1329,7 @@ const char *subst_token(const char *s, const char *tok, const char *new_val)
 
   /* if new_val is NULL or empty new_val_copy will be NULL */
 
-  dbg(1, "subst_token(): %s, %s, %s\n", s ? s : "<NULL>", tok ? tok : "<NULL>", new_val ? new_val : "<NULL>");
+  dbg(1, ("subst_token(): %s, %s, %s\n", s ? s : "<NULL>", tok ? tok : "<NULL>", new_val ? new_val : "<NULL>"));
   sizetok = size = CADCHUNKALLOC;
   my_realloc(_ALLOC_ID_, &result, size);
   my_realloc(_ALLOC_ID_, &token, sizetok);
@@ -1293,8 +1339,8 @@ const char *subst_token(const char *s, const char *tok, const char *new_val)
     space=SPACE(c);
     if(c == '"' && !escape) quote=!quote;
     /* alloc data */
-    STR_ALLOC(&result, result_pos, &size);
-    STR_ALLOC(&token, token_pos, &sizetok);
+    STR_ALLOC(_ALLOC_ID_, &result, result_pos, &size);
+    STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
 
     /* parsing state machine                                    */
     /* states:                                                  */
@@ -1328,7 +1374,7 @@ const char *subst_token(const char *s, const char *tok, const char *new_val)
             tmp = 2;
           }
 
-          STR_ALLOC(&result, tmp+2 + result_pos, &size);
+          STR_ALLOC(_ALLOC_ID_, &result, tmp+2 + result_pos, &size);
           memcpy(result + result_pos, "=", 1);
           memcpy(result + result_pos+1, new_val_copy, tmp);
           memcpy(result + result_pos+1+tmp, " ", 1);
@@ -1367,7 +1413,7 @@ const char *subst_token(const char *s, const char *tok, const char *new_val)
             new_val_copy = "\"\"";
             tmp = 2;
           }
-          STR_ALLOC(&result, tmp + result_pos, &size);
+          STR_ALLOC(_ALLOC_ID_, &result, tmp + result_pos, &size);
           memcpy(result + result_pos ,new_val_copy, tmp + 1);
           result_pos += tmp;
           done_subst = 1;
@@ -1403,7 +1449,7 @@ const char *subst_token(const char *s, const char *tok, const char *new_val)
     if(new_val_copy) {
       if(!new_val_copy[0]) new_val_copy = "\"\"";
       tmp = strlen(new_val_copy) + strlen(tok) + 2;
-      STR_ALLOC(&result, tmp + result_pos, &size);
+      STR_ALLOC(_ALLOC_ID_, &result, tmp + result_pos, &size);
       if(result_pos > 1 && (result[result_pos - 2] == ' ' || result[result_pos - 2] == '\n')) {
         /* result_pos guaranteed to be > 0 */
         my_snprintf(result + result_pos - 1, size, "%s=%s", tok, new_val_copy );
@@ -1413,7 +1459,7 @@ const char *subst_token(const char *s, const char *tok, const char *new_val)
       }
     }
   }
-  dbg(2, "subst_token(): returning: %s\n",result);
+  dbg(2, ("subst_token(): returning: %s\n",result));
   my_free(_ALLOC_ID_, &token);
   my_free(_ALLOC_ID_, &new_val_copy);
   return result;
@@ -1442,9 +1488,9 @@ const char *get_trailing_path(const char *str, int no_of_dir, int skip_ext)
   if(skip_ext) s[ext_pos] = '\0';
 
   if(dir_pos==len) return s;
-  dbg(2, "get_trailing_path(): str=%s, no_of_dir=%d, skip_ext=%d\n",
-                   str, no_of_dir, skip_ext);
-  dbg(2, "get_trailing_path(): returning: %s\n", s+(dir_pos<len ? dir_pos+1 : 0));
+  dbg(2, ("get_trailing_path(): str=%s, no_of_dir=%d, skip_ext=%d\n",
+                   str, no_of_dir, skip_ext));
+  dbg(2, ("get_trailing_path(): returning: %s\n", s+(dir_pos<len ? dir_pos+1 : 0)));
   return s+(dir_pos<len ? dir_pos+1 : 0);
 }
 
@@ -1485,7 +1531,7 @@ int count_items(const char *s, const char *sep, const char *quote)
     }
     e = 0;
   }
-  dbg(1, "count_items: s=%s, items=%d\n", s, items);
+  dbg(1, ("count_items: s=%s, items=%d\n", s, items));
   return items;
 }
 
@@ -1507,6 +1553,7 @@ void print_vhdl_element(FILE *fd, int inst)
   const char *fmt_attr = NULL;
   Int_hashtable table = {NULL, 0};
   const char *fmt;
+  char *gsn = NULL;
 
   fmt_attr = xctx->format ? xctx->format : "vhdl_format";
 
@@ -1539,17 +1586,19 @@ void print_vhdl_element(FILE *fd, int inst)
   s=xctx->inst[inst].prop_ptr;
 
  /* print instance name and subckt */
-  dbg(2, "print_vhdl_element(): printing inst name & subcircuit name\n");
+  dbg(2, ("print_vhdl_element(): printing inst name & subcircuit name\n"));
+  my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 0, 0));
   if( (lab = expandlabel(name, &tmp)) != NULL) {
     char *res = NULL;
-    fprintf(fd, "%d %s : %s\n", tmp, lab, sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res)) );
+    fprintf(fd, "%d %s : %s\n", tmp, lab, sanitize(translate(inst, gsn, &res)) );
     my_free(_ALLOC_ID_, &res);
   } else { /*  name in some strange format, probably an error */
     char *res = NULL;
-    fprintf(fd, "1 %s : %s\n", name, sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res)) );
+    fprintf(fd, "1 %s : %s\n", name, sanitize(translate(inst, gsn, &res)) );
     my_free(_ALLOC_ID_, &res);
   }
-  dbg(2, "print_vhdl_element(): printing generics passed as properties\n");
+  dbg(2, ("print_vhdl_element(): printing generics passed as properties\n"));
+  my_free(_ALLOC_ID_, &gsn);
 
 
   /* -------- print generics passed as properties */
@@ -1574,8 +1623,8 @@ void print_vhdl_element(FILE *fd, int inst)
    else if( (state==TOK_TOKEN || state==TOK_ENDTOK) && c=='=') state=TOK_SEP;
    else if( state==TOK_SEP && !space) state=TOK_VALUE;
    else if( state==TOK_VALUE && space && !quote) state=TOK_END;
-   STR_ALLOC(&value, value_pos, &sizeval);
-   STR_ALLOC(&token, token_pos, &sizetok);
+   STR_ALLOC(_ALLOC_ID_, &value, value_pos, &sizeval);
+   STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
    if(state==TOK_TOKEN) token[token_pos++]=(char)c;
    else if(state==TOK_VALUE) {
      if(c=='"' && !escape) quote=!quote;
@@ -1616,7 +1665,7 @@ void print_vhdl_element(FILE *fd, int inst)
   }
 
   /* -------- end print generics passed as properties */
-      dbg(2, "print_vhdl_element(): printing generic maps \n");
+      dbg(2, ("print_vhdl_element(): printing generic maps \n"));
 
      /* print generic map */
      for(i=0;i<no_of_generics; ++i)
@@ -1639,7 +1688,7 @@ void print_vhdl_element(FILE *fd, int inst)
     }
   }
   if(tmp) fprintf(fd, "\n)\n");
-   dbg(2, "print_vhdl_element(): printing port maps \n");
+   dbg(2, ("print_vhdl_element(): printing port maps \n"));
   /* print port map */
   fprintf(fd, "port map(\n" );
   tmp=0;
@@ -1663,7 +1712,7 @@ void print_vhdl_element(FILE *fd, int inst)
   }
   int_hash_free(&table);
   fprintf(fd, "\n);\n\n");
-   dbg(2, "print_vhdl_element(): ------- end ------ \n");
+   dbg(2, ("print_vhdl_element(): ------- end ------ \n"));
   my_free(_ALLOC_ID_, &name);
   my_free(_ALLOC_ID_, &generic_value);
   my_free(_ALLOC_ID_, &generic_type);
@@ -1692,7 +1741,7 @@ void print_generic(FILE *fd, char *ent_or_comp, int symbol)
     return;
   }
   my_strdup(_ALLOC_ID_, &generic_type, get_tok_value(xctx->sym[symbol].prop_ptr,"generic_type",0));
-  dbg(2, "print_generic(): symbol=%d template=%s \n", symbol, template);
+  dbg(2, ("print_generic(): symbol=%d template=%s \n", symbol, template));
 
   fprintf(fd, "%s %s ",ent_or_comp, get_cell(sanitize(xctx->sym[symbol].name), 0));
   if(!strcmp(ent_or_comp,"entity"))
@@ -1717,8 +1766,8 @@ void print_generic(FILE *fd, char *ent_or_comp, int symbol)
    else if( (state==TOK_TOKEN || state==TOK_ENDTOK) && c=='=') state=TOK_SEP;
    else if( state==TOK_SEP && !space) state=TOK_VALUE;
    else if( state==TOK_VALUE && space && !quote) state=TOK_END;
-   STR_ALLOC(&value, value_pos, &sizeval);
-   STR_ALLOC(&token, token_pos, &sizetok);
+   STR_ALLOC(_ALLOC_ID_, &value, value_pos, &sizeval);
+   STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
    if(state==TOK_TOKEN) token[token_pos++]=(char)c;
    else if(state==TOK_VALUE)
    {
@@ -1803,7 +1852,7 @@ void print_verilog_param(FILE *fd, int symbol)
  }
  my_strdup(_ALLOC_ID_, &generic_type, get_tok_value(xctx->sym[symbol].prop_ptr,"generic_type",0));
  my_strdup(_ALLOC_ID_, &extra, get_tok_value(xctx->sym[symbol].prop_ptr,"extra",0) );
- dbg(2, "print_verilog_param(): symbol=%d template=%s \n", symbol, template);
+ dbg(2, ("print_verilog_param(): symbol=%d template=%s \n", symbol, template));
 
  s=template;
  while(1)
@@ -1823,8 +1872,8 @@ void print_verilog_param(FILE *fd, int symbol)
   else if( state==TOK_SEP && !space) state=TOK_VALUE;
   else if( state==TOK_VALUE && space && !quote) state=TOK_END;
 
-  STR_ALLOC(&value, value_pos, &sizeval);
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &value, value_pos, &sizeval);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) token[token_pos++]=(char)c;
   else if(state==TOK_VALUE)
   {
@@ -1897,12 +1946,17 @@ void print_tedax_subckt(FILE *fd, int symbol)
  * checking with the corresponding symbol pin name and getting the net name attached to it.
  * Any name mismatch is reported, in this case the function does nothing and the default xschem
  * symbol port ordering will be used. */
-static int has_included_subcircuit(int inst, int symbol, char **result)
+int has_included_subcircuit(int inst, int symbol, char **result)
 {
   char *spice_sym_def = NULL;
   const char *translated_sym_def;
   int ret = 0;
+  static int alerts = 1;
 
+  if(symbol < 0 && inst < 0) { /* reset alerts */
+     alerts = 1;
+     return 0;
+  }
 
   my_strdup2(_ALLOC_ID_, &spice_sym_def, get_tok_value(xctx->inst[inst].prop_ptr, "spice_sym_def", 2));
   if(!spice_sym_def[0]) {
@@ -1929,11 +1983,11 @@ static int has_included_subcircuit(int inst, int symbol, char **result)
     }
     my_mstrcat(_ALLOC_ID_, &symname_attr, "symname=", get_cell(symname, 0), NULL);
     my_mstrcat(_ALLOC_ID_, &symname_attr, " symref=", get_sym_name(inst, 9999, 1, 1), NULL);
-    translated_sym_def = translate3(spice_sym_def, 1, xctx->inst[inst].prop_ptr,
+    translated_sym_def = translate3(spice_sym_def, inst, 1, xctx->inst[inst].prop_ptr,
                                                       xctx->sym[symbol].templ,
                                                       symname_attr, NULL, &res);
-    dbg(1, "has_included_subcircuit(): translated_sym_def=%s\n", translated_sym_def);
-    dbg(1, "has_included_subcircuit(): symname=%s\n", symname);
+    dbg(1, ("has_included_subcircuit(): translated_sym_def=%s\n", translated_sym_def));
+    dbg(1, ("has_included_subcircuit(): symname=%s\n", symname));
 
     /* pin list from symbol. Calculate also exp_no_of_pins */
     str_hash_init(&table, 6247);
@@ -1955,7 +2009,7 @@ static int has_included_subcircuit(int inst, int symbol, char **result)
         while((pin = my_strtok_r(pin_expanded_ptr, ",", "", 0, &pin_save))) {
           net = my_strtok_r(net_expanded_ptr, ",", "", 0, &net_save);
           str_hash_lookup(&table, pin, net ? net : "<NULL>", XINSERT_NOREPLACE);
-          dbg(1, "inserting pin: %s, net: %s\n", pin, net ? net : "<NULL>");
+          dbg(1, ("inserting pin: %s, net: %s\n", pin, net ? net : "<NULL>"));
           pin_expanded_ptr = NULL;
           net_expanded_ptr = NULL;
         }
@@ -1963,7 +2017,7 @@ static int has_included_subcircuit(int inst, int symbol, char **result)
         my_free(_ALLOC_ID_, &net_expanded);
       }
     }
-    dbg(1, "exp_no_of_pins=%d\n", exp_no_of_pins);
+    dbg(1, ("exp_no_of_pins=%d\n", exp_no_of_pins));
     /* process spice_sym_def spice netlist */
     strtolower(symname);
     tclvareval("has_included_subcircuit {", get_cell(symname, 0), "} {",
@@ -1980,7 +2034,7 @@ static int has_included_subcircuit(int inst, int symbol, char **result)
       int instance_pins = 0;
 
       my_strdup2(_ALLOC_ID_, &subckt_pinlist, tclresult());
-      dbg(1, "included subcircuit: pinlist=%s\n", subckt_pinlist);
+      dbg(1, ("included subcircuit: pinlist=%s\n", subckt_pinlist));
 
 
       /* list from subcircuit netlist */
@@ -1992,7 +2046,7 @@ static int has_included_subcircuit(int inst, int symbol, char **result)
           const char *net;
           net = entry->value;
           symbol_pins++;
-          dbg(1, "subckt_pin=%s, net=%s\n", subckt_pin, net);
+          dbg(1, ("subckt_pin=%s, net=%s\n", subckt_pin, net));
           my_mstrcat(_ALLOC_ID_, &tmp_result, "?1 ", net, " ", NULL);
         }
         subckt_pinlist_ptr = NULL;
@@ -2003,11 +2057,15 @@ static int has_included_subcircuit(int inst, int symbol, char **result)
         ret = 1;
         my_mstrcat(_ALLOC_ID_, result, tmp_result, NULL);
       } else {
-        dbg(0, "has_included_subcircuit(): %s symbol and .subckt pins do not match. Discard port order\n",
+        info("has_included_subcircuit(): %s symbol and .subckt pins do not match. Discard port order\n",
                 symname);
-        if(has_x)
-           tclvareval("alert_ {has_included_subcircuit(): ", symname,
-                   " symbol and .subckt pins do not match. Discard .subckt port order}", NULL);
+        if(has_x && alerts) {
+           tclvareval("alert_ {has_included_subcircuit():\n", symname,
+                   "symbol and .subckt pins do not match. Discard .subckt port order\n",
+                   "Continue issuing alerts?} {} 0 1",
+                    NULL);
+           if(!strcmp(tclresult(), "0")) alerts = 0;
+        }
       }
       if(tmp_result) my_free(_ALLOC_ID_, &tmp_result);
       my_free(_ALLOC_ID_, &subckt_pinlist);
@@ -2037,7 +2095,7 @@ void print_spice_subckt_nodes(FILE *fd, int symbol)
  my_strdup(_ALLOC_ID_, &format1, get_tok_value(xctx->sym[symbol].prop_ptr, fmt_attr, 2));
  if(!xctx->tok_size && strcmp(fmt_attr, "format") )
    my_strdup(_ALLOC_ID_, &format1, get_tok_value(xctx->sym[symbol].prop_ptr, "format", 2));
- dbg(1, "print_spice_subckt(): format1=%s\n", format1);
+ dbg(1, ("print_spice_subckt(): format1=%s\n", format1));
 
  /* can not do this, since @symname is used as a token later in format parser */
  /* my_strdup(_ALLOC_ID_, &format1,
@@ -2054,7 +2112,7 @@ void print_spice_subckt_nodes(FILE *fd, int symbol)
    my_strdup(_ALLOC_ID_, &format,  format1);
  }
  if(format1) my_free(_ALLOC_ID_, &format1);
- dbg(1, "print_spice_subckt(): format=%s\n", format);
+ dbg(1, ("print_spice_subckt(): format=%s\n", format));
  if( format==NULL ) {
    return; /* no format */
  }
@@ -2082,7 +2140,7 @@ void print_spice_subckt_nodes(FILE *fd, int symbol)
     state = TOK_SEP;
   }
 
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) {
     token[token_pos++]=(char)c;
   }
@@ -2108,12 +2166,18 @@ void print_spice_subckt_nodes(FILE *fd, int symbol)
      for(i=0;i<no_of_pins; ++i)
      {
        if(strboolcmp(get_tok_value(xctx->sym[symbol].rect[PINLAYER][i].prop_ptr,"spice_ignore",0), "true")) {
-         const char *name = get_tok_value(xctx->sym[symbol].rect[PINLAYER][i].prop_ptr,"name",0);
-         if(!int_hash_lookup(&table, name, 1, XINSERT_NOREPLACE)) {
-           str_ptr= expandlabel(name, &multip);
+         char *name = NULL;
+         char *tr_name = NULL;
+         my_strdup2(_ALLOC_ID_, &name, get_tok_value(xctx->sym[symbol].rect[PINLAYER][i].prop_ptr,"name",0));
+         translate3(name, -1, 1, xctx->currsch > 0 ? xctx->hier_attr[xctx->currsch - 1].prop_ptr : NULL,
+           NULL, NULL, NULL, &tr_name);
+         if(!int_hash_lookup(&table, tr_name, 1, XINSERT_NOREPLACE)) {
+           str_ptr= expandlabel(eval_expr(tr_name), &multip);
            /* fprintf(fd, "%s ", str_ptr); */
            my_mstrcat(_ALLOC_ID_, &result, str_ptr, " ", NULL);
          }
+         my_free(_ALLOC_ID_, &name);
+         my_free(_ALLOC_ID_, &tr_name);
        }
      }
      int_hash_free(&table);
@@ -2198,7 +2262,7 @@ void print_spectre_subckt_nodes(FILE *fd, int symbol)
  my_strdup(_ALLOC_ID_, &format1, get_tok_value(xctx->sym[symbol].prop_ptr, fmt_attr, 2));
  if(!xctx->tok_size && strcmp(fmt_attr, "spectre_format") )
    my_strdup(_ALLOC_ID_, &format1, get_tok_value(xctx->sym[symbol].prop_ptr, "spectre_format", 2));
- dbg(1, "print_spectre_subckt(): format1=%s\n", format1);
+ dbg(1, ("print_spectre_subckt(): format1=%s\n", format1));
 
  /* can not do this, since @symname is used as a token later in format parser */
  /* my_strdup(_ALLOC_ID_, &format1,
@@ -2215,7 +2279,7 @@ void print_spectre_subckt_nodes(FILE *fd, int symbol)
    my_strdup(_ALLOC_ID_, &format,  format1);
  }
  if(format1) my_free(_ALLOC_ID_, &format1);
- dbg(1, "print_spectre_subckt(): format=%s\n", format);
+ dbg(1, ("print_spectre_subckt(): format=%s\n", format));
  if( format==NULL ) {
    return; /* no format */
  }
@@ -2243,7 +2307,7 @@ void print_spectre_subckt_nodes(FILE *fd, int symbol)
     state = TOK_SEP;
   }
 
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) {
     token[token_pos++]=(char)c;
   }
@@ -2348,7 +2412,7 @@ int has_token(const char *s, const char *tok)
 
   while(1) {
     item = find_nth(s, " ", "", 1, i);
-    dbg(1, "item=%s, tok=%s\n", item, tok);
+    dbg(1, ("item=%s, tok=%s\n", item, tok));
     if(!item[0]) break;
     else if(!strcmp(tok, item)) {
       ret = 1;
@@ -2406,7 +2470,7 @@ int print_spice_element(FILE *fd, int inst)
   }
   no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
   s=format;
-  dbg(1, "print_spice_element(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count);
+  dbg(1, ("print_spice_element(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count));
   /* begin parsing format string */
   while(1)
   {
@@ -2427,10 +2491,10 @@ int print_spice_element(FILE *fd, int inst)
          ( (!space && c != '%' && c != '@') && escape  )
        )
       ) {
-      dbg(1, "print_spice_element(): c=%c, space=%d, escape=%d token_pos=%d\n", c, space, escape, token_pos);
+      dbg(1, ("print_spice_element(): c=%c, space=%d, escape=%d token_pos=%d\n", c, space, escape, token_pos));
       state=TOK_SEP;
     }
-    STR_ALLOC(&token, token_pos, &sizetok);
+    STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
     if(state==TOK_TOKEN) {
       token[token_pos++]=(char)c;
     }
@@ -2449,16 +2513,24 @@ int print_spice_element(FILE *fd, int inst)
       else if (strcmp(token,"@symname")==0) /* of course symname must not be present in attributes */
       {
         char *res = NULL;
-        const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res));
+        char *gsn = NULL;
+        const char *s;
+        my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 0, 0));
+        s = sanitize(translate(inst, gsn, &res));
         my_mstrcat(_ALLOC_ID_, &result, s, NULL);
         my_free(_ALLOC_ID_, &res);
+        my_free(_ALLOC_ID_, &gsn);
       }
       else if (strcmp(token,"@symname_ext")==0) /* of course symname_ext must not be present in attributes */
       {
         char *res = NULL;
-        const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 1, 0), &res));
+        char *gsn = NULL;
+        const char *s;
+        my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 1, 0));
+        s = sanitize(translate(inst, gsn, &res));
         my_mstrcat(_ALLOC_ID_, &result, s, NULL);
         my_free(_ALLOC_ID_, &res);
+        my_free(_ALLOC_ID_, &gsn);
       }
       else if(strcmp(token,"@topschname")==0) /* of course topschname must not be present in attributes */
       {
@@ -2484,6 +2556,10 @@ int print_spice_element(FILE *fd, int inst)
       {
         const char *schname = get_cell(xctx->current_name, 0);
         my_mstrcat(_ALLOC_ID_, &result, schname, NULL);
+      }
+      else if(strcmp(token,"@index")==0)
+      {
+        my_mstrcat(_ALLOC_ID_, &result, my_itoa(inst), NULL);
       }
       else if(strcmp(token,"@pinlist")==0) /* of course pinlist must not be present in attributes */
                                            /* print multiplicity */
@@ -2589,7 +2665,7 @@ int print_spice_element(FILE *fd, int inst)
         tclcmd = my_malloc(_ALLOC_ID_, s);
         Tcl_ResetResult(interp);
         my_snprintf(tclcmd, s, "tclpropeval {%s} {%s} {%s}", token, name, xctx->inst[inst].name);
-        dbg(1, "print_spice_element(): tclpropeval {%s} {%s} {%s}", token, name, xctx->inst[inst].name);
+        dbg(1, ("print_spice_element(): tclpropeval {%s} {%s} {%s}", token, name, xctx->inst[inst].name));
         res = tcleval(tclcmd);
 
         my_mstrcat(_ALLOC_ID_, &result, res, NULL);
@@ -2607,9 +2683,7 @@ int print_spice_element(FILE *fd, int inst)
         size_t tok_val_len;
         char *parent_prop_ptr = NULL;
         char *parent_templ = NULL;
-        char *schname_attr = NULL;
         char *res = NULL;
-        my_mstrcat(_ALLOC_ID_, &schname_attr, "schname=\"", get_cell(xctx->current_name, 0), "\"", NULL);
 
         if(xctx->currsch > 0) {
           parent_prop_ptr = xctx->hier_attr[xctx->currsch - 1].prop_ptr;
@@ -2634,33 +2708,32 @@ int print_spice_element(FILE *fd, int inst)
          */
 
         my_strdup2(_ALLOC_ID_, &val,
-             translate3(token, 0, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res));
+             translate3(token, inst, 1, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res));
         /* can not put template in above translate3: ---------------------------^^^^
          * if instance has VHI=VHI, format string has VHI=@VHI, and symbol template has VHI=3
          * we do not want token @VHI to resolve to 3, but stop at VHI as specified in instance */
-        if(strchr(val, '@')) {
+        if(strpbrk(val, "@%")) {
            my_strdup2(_ALLOC_ID_, &val,
-              translate3(val, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
+              translate3(val, inst, 1, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
         }
         /* nmos instance format string: @model --> @modeln */
-        dbg(1, "print_spice_element(): 1st round: val: |%s|\n", val);
-        if(strchr(val, '@')) {
+        dbg(1, ("print_spice_element(): 1st round: val: |%s|\n", val));
+        if(strpbrk(val, "@%")) {
             my_strdup2(_ALLOC_ID_, &val,
-                   translate3(val, 1, schname_attr, xctx->inst[inst].prop_ptr, NULL, NULL, &res));
+                   translate3(val, -1, 1, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res));
             /*                        ............ --> replace @symname with symbol name */
-            dbg(1, "print_spice_element(): 2nd round: val: |%s|\n", val);
+            dbg(1, ("print_spice_element(): 2nd round: val: |%s|\n", val));
             /* normal passgate.sym placement, nmos instance format string:
                  ad="expr('int((@nf + 1)/2) * @W / @nf * 0.29')" --> ad="expr('int((1 + 1)/2) * W_N/ 1 * 0.29')" */
-            if(strchr(val, '@')) {
+            if(strpbrk(val, "@%")) {
               my_strdup2(_ALLOC_ID_, &val,
-                     translate3(val, 0, xctx->inst[inst].prop_ptr, parent_templ, NULL, NULL, &res));
-              dbg(1, "print_spice_element(): 3nd round: val: |%s|\n", val);
+                     translate3(val, -1, 0, xctx->inst[inst].prop_ptr, parent_templ, NULL, NULL, &res));
+              dbg(1, ("print_spice_element(): 3nd round: val: |%s|\n", val));
               /* normal passgate.sym placement, nmos instance format string:
                *   @modeln --> nfet_01v8 */
             }
-          dbg(1, "print_spice_element(): final: val: |%s|\n", val);
+          dbg(1, ("print_spice_element(): final: val: |%s|\n", val));
         }
-        my_free(_ALLOC_ID_, &schname_attr);
         /* still unresolved: set to empty */
         if(val[0] == '@') value = "";
         else value = val;
@@ -2673,9 +2746,7 @@ int print_spice_element(FILE *fd, int inst)
           value = spiceprefixtag;
         }
 
-        if(is_expr(value)) {
-          value =  eval_expr(value);
-        }
+        value =  eval_expr(value);
         /* token=%xxxx and xxxx is not defined in prop_ptr or template: return xxxx */
         if(!token_exists && token[0] =='%') {
           my_mstrcat(_ALLOC_ID_, &result, token + 1, NULL);
@@ -2729,11 +2800,11 @@ int print_spice_element(FILE *fd, int inst)
   if(result) {
      my_strdup(_ALLOC_ID_, &result, tcl_hook2(result));
   }
-  if(is_expr(result)) {
-    my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
+  my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
+  if(result) {
+     fprintf(fd, "%s", result);
   }
-  if(result) fprintf(fd, "%s", result);
-  dbg(1, "print_spice_element(): returning |%s|\n", result);
+  dbg(1, ("print_spice_element(): returning |%s|\n", result));
   my_free(_ALLOC_ID_, &template);
   my_free(_ALLOC_ID_, &format);
   my_free(_ALLOC_ID_, &name);
@@ -2791,7 +2862,7 @@ int print_spectre_element(FILE *fd, int inst)
   }
   no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
   s=format;
-  dbg(1, "print_spectre_element(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count);
+  dbg(1, ("print_spectre_element(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count));
   /* begin parsing format string */
   while(1)
   {
@@ -2812,10 +2883,10 @@ int print_spectre_element(FILE *fd, int inst)
          ( (!space && c != '%' && c != '@') && escape  )
        )
       ) {
-      dbg(1, "print_spectre_element(): c=%c, space=%d, escape=%d token_pos=%d\n", c, space, escape, token_pos);
+      dbg(1, ("print_spectre_element(): c=%c, space=%d, escape=%d token_pos=%d\n", c, space, escape, token_pos));
       state=TOK_SEP;
     }
-    STR_ALLOC(&token, token_pos, &sizetok);
+    STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
     if(state==TOK_TOKEN) {
       token[token_pos++]=(char)c;
     }
@@ -2834,16 +2905,24 @@ int print_spectre_element(FILE *fd, int inst)
       else if (strcmp(token,"@symname")==0) /* of course symname must not be present in attributes */
       {
         char *res = NULL;
-        const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res));
+        char *gsn = NULL;
+        const char *s;
+        my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 0, 0));
+        s = sanitize(translate(inst, gsn, &res));
         my_mstrcat(_ALLOC_ID_, &result, s, NULL);
         my_free(_ALLOC_ID_, &res);
+        my_free(_ALLOC_ID_, &gsn);
       }
       else if (strcmp(token,"@symname_ext")==0) /* of course symname_ext must not be present in attributes */
-      {
+      { 
         char *res = NULL;
-        const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 1, 0), &res));
+        char *gsn = NULL;
+        const char *s;
+        my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 1, 0));
+        s = sanitize(translate(inst, gsn, &res));
         my_mstrcat(_ALLOC_ID_, &result, s, NULL);
         my_free(_ALLOC_ID_, &res);
+        my_free(_ALLOC_ID_, &gsn);
       }
       else if(strcmp(token,"@topschname")==0) /* of course topschname must not be present in attributes */
       {
@@ -2869,6 +2948,10 @@ int print_spectre_element(FILE *fd, int inst)
       {
         const char *schname = get_cell(xctx->current_name, 0);
         my_mstrcat(_ALLOC_ID_, &result, schname, NULL);
+      }
+      else if(strcmp(token,"@index")==0)
+      {
+        my_mstrcat(_ALLOC_ID_, &result, my_itoa(inst), NULL);
       }
       else if(strcmp(token,"@pinlist")==0) /* of course pinlist must not be present in attributes */
                                            /* print multiplicity */
@@ -2972,7 +3055,7 @@ int print_spectre_element(FILE *fd, int inst)
         tclcmd = my_malloc(_ALLOC_ID_, s);
         Tcl_ResetResult(interp);
         my_snprintf(tclcmd, s, "tclpropeval {%s} {%s} {%s}", token, name, xctx->inst[inst].name);
-        dbg(1, "print_spectre_element(): tclpropeval {%s} {%s} {%s}", token, name, xctx->inst[inst].name);
+        dbg(1, ("print_spectre_element(): tclpropeval {%s} {%s} {%s}", token, name, xctx->inst[inst].name));
         res = tcleval(tclcmd);
 
         my_mstrcat(_ALLOC_ID_, &result, res, NULL);
@@ -3018,30 +3101,30 @@ int print_spectre_element(FILE *fd, int inst)
 
 
         my_strdup2(_ALLOC_ID_, &val,
-             translate3(token, 0, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res));
+             translate3(token, inst, 1, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res));
         /* can not put template in above translate3: ---------------------------^^^^
          * if instance has VHI=VHI, format string has VHI=@VHI, and symbol template has VHI=3
          * we do not want token @VHI to resolve to 3, but stop at VHI as specified in instance */
-        if(strchr(val, '@')) {
+        if(strpbrk(val, "@%")) {
            my_strdup2(_ALLOC_ID_, &val,
-              translate3(val, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
+              translate3(val, inst, 1, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
         }
         /* nmos instance format string: @model --> @modeln */
-        dbg(1, "print_spectre_element(): 1st round: val: |%s|\n", val);
-        if(strchr(val, '@')) {
+        dbg(1, ("print_spectre_element(): 1st round: val: |%s|\n", val));
+        if(strpbrk(val, "@%")) {
           my_strdup2(_ALLOC_ID_, &val,
-                 translate3(val, 0, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res));
-          dbg(1, "print_spectre_element(): 2nd round: val: |%s|\n", val);
+                 translate3(val, -1, 1, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res));
+          dbg(1, ("print_spectre_element(): 2nd round: val: |%s|\n", val));
           /* normal passgate.sym placement, nmos instance format string:
                ad="expr('int((@nf + 1)/2) * @W / @nf * 0.29')" --> ad="expr('int((1 + 1)/2) * W_N/ 1 * 0.29')" */
-          if(strchr(val, '@')) {
+          if(strpbrk(val, "@%")) {
             my_strdup2(_ALLOC_ID_, &val,
-                   translate3(val, 0, xctx->inst[inst].prop_ptr, parent_templ, NULL, NULL, &res));
-            dbg(1, "print_spectre_element(): 3nd round: val: |%s|\n", val);
+                   translate3(val, -1, 1, xctx->inst[inst].prop_ptr, parent_templ, NULL, NULL, &res));
+            dbg(1, ("print_spectre_element(): 3nd round: val: |%s|\n", val));
             /* normal passgate.sym placement, nmos instance format string:
              *   @modeln --> nfet_01v8 */
           }
-          dbg(1, "print_spectre_element(): final: val: |%s|\n", val);
+          dbg(1, ("print_spectre_element(): final: val: |%s|\n", val));
         }
         /* still unresolved: set to empty */
         if(val[0] == '@') value = "";
@@ -3055,9 +3138,7 @@ int print_spectre_element(FILE *fd, int inst)
           value = spiceprefixtag;
         }
 
-        if(is_expr(value)) {
-          value =  eval_expr(value);
-        }
+        value =  eval_expr(value);
         /* token=%xxxx and xxxx is not defined in prop_ptr or template: return xxxx */
         if(!token_exists && token[0] =='%') {
           my_mstrcat(_ALLOC_ID_, &result, token + 1, NULL);
@@ -3111,11 +3192,9 @@ int print_spectre_element(FILE *fd, int inst)
   if(result) {
      my_strdup(_ALLOC_ID_, &result, tcl_hook2(result));
   }
-  if(is_expr(result)) {
-    my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
-  }
+  my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
   if(result) fprintf(fd, "%s", result);
-  dbg(1, "print_spectre_element(): returning |%s|\n", result);
+  dbg(1, ("print_spectre_element(): returning |%s|\n", result));
   my_free(_ALLOC_ID_, &template);
   my_free(_ALLOC_ID_, &format);
   my_free(_ALLOC_ID_, &name);
@@ -3177,11 +3256,13 @@ void print_tedax_element(FILE *fd, int inst)
    int pin_mult;
    int n;
    char *res = NULL;
+   char *gsn = NULL;
    Int_hashtable table={NULL, 0};
    subcircuit = 1;
-   fprintf(fd, "__subcircuit__ %s %s\n",
-       sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res)), xctx->inst[inst].instname);
+   my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 0, 0));
+   fprintf(fd, "__subcircuit__ %s %s\n", sanitize(translate(inst, gsn, &res)), xctx->inst[inst].instname);
    my_free(_ALLOC_ID_, &res);
+   my_free(_ALLOC_ID_, &gsn);
    int_hash_init(&table, 37);
    for(i=0;i<no_of_pins; ++i) {
      my_strdup2(_ALLOC_ID_, &net, net_name(inst,i, &net_mult, 0, 1));
@@ -3189,7 +3270,7 @@ void print_tedax_element(FILE *fd, int inst)
        get_tok_value(xctx->sym[xctx->inst[inst].ptr].rect[PINLAYER][i].prop_ptr,"name",0));
      my_strdup2(_ALLOC_ID_, &pin, expandlabel(pinname, &pin_mult));
      if(!int_hash_lookup(&table, pinname, 1, XINSERT_NOREPLACE)) {
-       dbg(1, "#net=%s pinname=%s pin=%s net_mult=%d pin_mult=%d\n", net, pinname, pin, net_mult, pin_mult);
+       dbg(1, ("#net=%s pinname=%s pin=%s net_mult=%d pin_mult=%d\n", net, pinname, pin, net_mult, pin_mult));
        for(n = 0; n < net_mult; ++n) {
          my_strdup(_ALLOC_ID_, &netbit, find_nth(net, ",", "", 0, n+1));
          my_strdup(_ALLOC_ID_, &pinbit, find_nth(pin, ",", "", 0, n+1));
@@ -3242,19 +3323,15 @@ void print_tedax_element(FILE *fd, int inst)
 
    if(extra){
      char netstring[40];
-     /* fprintf(errfp, "extra_pinnumber: |%s|\n", extra_pinnumber); */
-     /* fprintf(errfp, "extra: |%s|\n", extra); */
      for(extra_ptr = extra, extra_pinnumber_ptr = extra_pinnumber; ; extra_ptr=NULL, extra_pinnumber_ptr=NULL) {
        extra_pinnumber_token=my_strtok_r(extra_pinnumber_ptr, " ", "", 0, &saveptr1);
        extra_token=my_strtok_r(extra_ptr, " ", "", 0, &saveptr2);
        if(!extra_token) break;
-       /* fprintf(errfp, "extra_pinnumber_token: |%s|\n", extra_pinnumber_token); */
-       /* fprintf(errfp, "extra_token: |%s|\n", extra_token); */
        instance_based=0;
 
        /* alternate instance based extra net naming: net:<pinumber>=netname */
        my_snprintf(netstring, S(netstring), "net:%s", extra_pinnumber_token);
-       dbg(1, "print_tedax_element(): netstring=%s\n", netstring);
+       dbg(1, ("print_tedax_element(): netstring=%s\n", netstring));
        extra_token_val=get_tok_value(xctx->inst[inst].prop_ptr, extra_token, 0);
        if(!extra_token_val[0]) extra_token_val=get_tok_value(xctx->inst[inst].prop_ptr, netstring, 0);
        if(!extra_token_val[0]) extra_token_val=get_tok_value(template, extra_token, 0);
@@ -3270,7 +3347,7 @@ void print_tedax_element(FILE *fd, int inst)
  }
  if(format) {
   s=format;
-  dbg(1, "print_tedax_element(): name=%s, tedax_format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count);
+  dbg(1, ("print_tedax_element(): name=%s, tedax_format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count));
   /* begin parsing format string */
   while(1)
   {
@@ -3293,7 +3370,7 @@ void print_tedax_element(FILE *fd, int inst)
      state=TOK_SEP;
    }
 
-   STR_ALLOC(&token, token_pos, &sizetok);
+   STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
    if(state==TOK_TOKEN) {
      token[token_pos++]=(char)c; /* 20171029 remove escaping backslashes */
    }
@@ -3316,20 +3393,27 @@ void print_tedax_element(FILE *fd, int inst)
       const char *s = get_sym_name(inst, 9999, 1, 0);
       fputs(s, fd);
     }
-    else if(strcmp(token,"@symname")==0)        /* of course symname must not be present  */
-                                        /* in hash table */
-    {
+    else if (strcmp(token,"@symname")==0)
+    {                                 
       char *res = NULL;
-      const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res));
+      char *gsn = NULL;
+      const char *s;
+      my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 0, 0));
+      s = sanitize(translate(inst, gsn, &res));
       fputs(s, fd);
       my_free(_ALLOC_ID_, &res);
-    }
+      my_free(_ALLOC_ID_, &gsn);
+    } 
     else if (strcmp(token,"@symname_ext")==0)
-    {
+    { 
       char *res = NULL;
-      const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 1, 0), &res));
+      char *gsn = NULL;
+      const char *s;
+      my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 1, 0));
+      s = sanitize(translate(inst, gsn, &res));
       fputs(s, fd);
       my_free(_ALLOC_ID_, &res);
+      my_free(_ALLOC_ID_, &gsn);
     }
     else if(strcmp(token,"@schname_ext")==0)        /* of course schname must not be present  */
                                                 /* in hash table */
@@ -3341,6 +3425,10 @@ void print_tedax_element(FILE *fd, int inst)
                                                 /* in hash table */
     {
      fputs(get_cell(xctx->current_name, 0), fd);
+    }
+    else if(strcmp(token,"@index")==0)
+    {
+      fputs(my_itoa(inst), fd);
     }
     else if(strcmp(token,"@topschname")==0) /* of course topschname must not be present in attributes */
     {
@@ -3354,7 +3442,6 @@ void print_tedax_element(FILE *fd, int inst)
      for(i=0;i<no_of_pins; ++i)
      {
        str_ptr =  net_name(inst,i, &multip, 0, 1);
-       /* fprintf(errfp, "inst: %s  --> %s\n", name, str_ptr); */
        fprintf(fd, "?%d %s ", multip, str_ptr);
      }
     }
@@ -3449,7 +3536,6 @@ void print_tedax_element(FILE *fd, int inst)
       tcleval(tclcmd);
       fprintf(fd, "%s", tclresult());
       my_free(_ALLOC_ID_, &tclcmd);
-      /* fprintf(errfp, "%s\n", tclcmd); */
     } /* /20171029 */
 
 
@@ -3482,8 +3568,8 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
   const char *str_ptr;
   register int c, state=TOK_BEGIN, space;
   const char *lab;
-  char *template=NULL,*format=NULL,*s=NULL, *name=NULL, *token=NULL;
-  const char *value;
+  char *template=NULL,*format=NULL,*s=NULL, *name=NULL, *token=NULL, *tr_name = NULL;
+  char *value = NULL;
   size_t sizetok=0;
   size_t token_pos=0;
   int escape=0;
@@ -3518,10 +3604,17 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
   }
   no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
   s=format;
-  dbg(1, "print_verilog_primitive(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count);
+  dbg(1, ("print_verilog_primitive(): name=%s, format=%s xctx->netlist_count=%d\n",name,format, xctx->netlist_count));
 
   fprintf(fd, "---- start primitive ");
-  expandlabel(name, &tmp);
+  
+
+  translate3(name, inst, 1, xctx->currsch > 0 ? xctx->hier_attr[xctx->currsch - 1].prop_ptr : NULL,
+        NULL, NULL, NULL, &tr_name);
+  my_strdup2(_ALLOC_ID_, &tr_name, eval_expr(tr_name));
+  expandlabel(tr_name, &tmp);
+  my_free(_ALLOC_ID_, &tr_name);
+
   fprintf(fd, "%d\n",tmp);
   /* begin parsing format string */
   while(1)
@@ -3544,7 +3637,7 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
      state=TOK_SEP;
    }
 
-   STR_ALLOC(&token, token_pos, &sizetok);
+   STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
    if(state==TOK_TOKEN) {
       token[token_pos++]=(char)c;
    }
@@ -3553,49 +3646,62 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
     token[token_pos]='\0';
     token_pos=0;
 
-    value = get_tok_value(xctx->inst[inst].prop_ptr, token+1, 0);
+    my_strdup2(_ALLOC_ID_, &value, get_tok_value(xctx->inst[inst].prop_ptr, token+1, 0));
     /* xctx->tok_size==0 indicates that token(+1) does not exist in instance attributes */
-    if(!xctx->tok_size)
-    value=get_tok_value(template, token+1, 0);
+    if(!xctx->tok_size) {
+      my_strdup2(_ALLOC_ID_, &value, get_tok_value(template, token+1, 0));
+    }
     if(!xctx->tok_size && token[0] =='%') {
       my_mstrcat(_ALLOC_ID_, &result, token + 1, NULL);
     } else if(value && value[0]!='\0') {
        /* instance names (name) and node labels (lab) go thru the expandlabel function. */
        /*if something else must be parsed, put an if here! */
-
+     char *tr_value = NULL;
+     translate3(value, inst, 1, xctx->currsch > 0 ? xctx->hier_attr[xctx->currsch - 1].prop_ptr : NULL,
+           NULL, NULL, NULL, &tr_value);
+     my_strdup2(_ALLOC_ID_, &tr_value, eval_expr(tr_value));
      if(!(strcmp(token+1,"name"))) {
-       if( (lab=expandlabel(value, &tmp)) != NULL)
+ 
+       if( (lab=expandlabel(tr_value, &tmp)) != NULL)
           my_mstrcat(_ALLOC_ID_, &result, "----name(", lab, ")", NULL);
        else
-          my_mstrcat(_ALLOC_ID_, &result, value, NULL);
+          my_mstrcat(_ALLOC_ID_, &result, tr_value, NULL);
      }
      else if(!(strcmp(token+1,"lab"))) {
-       if( (lab=expandlabel(value, &tmp)) != NULL)
+       if( (lab=expandlabel(tr_value, &tmp)) != NULL)
           my_mstrcat(_ALLOC_ID_, &result, "----pin(", lab, ")", NULL);
        else
-          my_mstrcat(_ALLOC_ID_, &result, value, NULL);
+          my_mstrcat(_ALLOC_ID_, &result, tr_value, NULL);
      }
-     else my_mstrcat(_ALLOC_ID_, &result, value, NULL);
+     else my_mstrcat(_ALLOC_ID_, &result, tr_value, NULL);
+     my_free(_ALLOC_ID_, &tr_value);
     }
     else if(strcmp(token,"@symref")==0)
     {
       const char *s = get_sym_name(inst, 9999, 1, 0);
       my_mstrcat(_ALLOC_ID_, &result, s, NULL);
     }
-    else if(strcmp(token,"@symname")==0) /* of course symname must not be present  */
-                                         /* in hash table */
-    {
+    else if (strcmp(token,"@symname")==0)
+    {                                 
       char *res = NULL;
-      const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 0, 0), &res));
+      char *gsn = NULL;
+      const char *s;
+      my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 0, 0));
+      s = sanitize(translate(inst, gsn, &res));
       my_mstrcat(_ALLOC_ID_, &result, s, NULL);
       my_free(_ALLOC_ID_, &res);
-    }
+      my_free(_ALLOC_ID_, &gsn);
+    } 
     else if (strcmp(token,"@symname_ext")==0)
-    {
+    { 
       char *res = NULL;
-      const char *s = sanitize(translate(inst, get_sym_name(inst, 0, 1, 0), &res));
+      char *gsn = NULL;
+      const char *s;
+      my_strdup2(_ALLOC_ID_, &gsn, get_sym_name(inst, 0, 1, 0));
+      s = sanitize(translate(inst, gsn, &res));
       my_mstrcat(_ALLOC_ID_, &result, s, NULL);
       my_free(_ALLOC_ID_, &res);
+      my_free(_ALLOC_ID_, &gsn);
     }
     else if(strcmp(token,"@schname_ext")==0) /* of course schname must not be present  */
                                          /* in hash table */
@@ -3606,6 +3712,10 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
                                          /* in hash table */
     {
       my_mstrcat(_ALLOC_ID_, &result, get_cell(xctx->current_name, 0), NULL);
+    }
+    else if(strcmp(token,"@index")==0)
+    {
+      my_mstrcat(_ALLOC_ID_, &result, my_itoa(inst), NULL);
     }
     else if(strcmp(token,"@topschname")==0) /* of course topschname must not be present in attributes */
     {
@@ -3654,6 +3764,7 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
       n = get_inst_pin_number(inst, pin_num_or_name);
       if(n>=0  && pin_attr[0] && n < (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER]) {
         char *pin_attr_value = NULL;
+        char *pval;
         int is_net_name = !strcmp(pin_attr, "net_name");
         /* get pin_attr value from instance: "pinnumber(ENABLE)=5" --> return 5, attr "pinnumber" of pin "ENABLE"
          *                                   "pinnumber(3)=6       --> return 6, attr "pinnumber" of 4th pin */
@@ -3672,9 +3783,9 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
                xctx->inst[inst].node && xctx->inst[inst].node[n] ? xctx->inst[inst].node[n] : "?");
         }
         if(!pin_attr_value ) my_strdup(_ALLOC_ID_, &pin_attr_value, "--UNDEF--");
-        value = pin_attr_value;
+        pval = pin_attr_value;
         /* recognize slotted devices: instname = "U3:3", value = "a:b:c:d" --> value = "c" */
-        if(value[0] && !strcmp(pin_attr, "pinnumber") ) {
+        if(pval[0] && !strcmp(pin_attr, "pinnumber") ) {
           char *ss;
           int slot;
           char *tmpstr = NULL;
@@ -3683,12 +3794,12 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
             sscanf(ss+1, "%s", tmpstr);
             if(isonlydigit(tmpstr)) {
               slot = atoi(tmpstr);
-              if(strstr(value,":")) value = find_nth(value, ":", "", 0, slot);
+              if(strstr(pval,":")) pval = find_nth(pval, ":", "", 0, slot);
             }
           }
           my_free(_ALLOC_ID_, &tmpstr);
         }
-        my_mstrcat(_ALLOC_ID_, &result, value, NULL);
+        my_mstrcat(_ALLOC_ID_, &result, pval, NULL);
         my_free(_ALLOC_ID_, &pin_attr_value);
       }
       else if(n>=0  && n < (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER]) {
@@ -3724,6 +3835,7 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
     }
     if(c == '@' || c == '%') s--;
     state=TOK_BEGIN;
+    my_free(_ALLOC_ID_, &value);
    }
    else if(state==TOK_BEGIN && c!='\0')  {
      char str[2];
@@ -3742,28 +3854,26 @@ static void print_verilog_primitive(FILE *fd, int inst) /* netlist switch level 
     /* if result is like: 'tcleval(some_string)' pass it thru tcl evaluation so expressions
      * can be calculated. Before that do also a round of translation to remove remaining @params */
     if(result) {
-      dbg(1, "print_verilog_primitive(): before translate3() result=%s\n", result);
-      if(strchr(result, '@')) {
+      dbg(1, ("print_verilog_primitive(): before translate3() result=%s\n", result));
+      if(strpbrk(result, "@%")) {
         char *res = NULL;
         /* netlist_commands often have @ characters due to ngspice syntax. Do not translate */
         if(strcmp(xctx->sym[xctx->inst[inst].ptr].type, "netlist_commands")) {
           my_strdup2(_ALLOC_ID_, &result,
-            translate3(result, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, NULL, NULL, &res));
+            translate3(result, inst, 1, xctx->inst[inst].prop_ptr, parent_prop_ptr, NULL, NULL, &res));
           /* can not put template in above translate3: -----------------------^^^^
            * if instance has VHI=VHI, format string has VHI=@VHI, and symbol template has VHI=3
            * we do not want token @VHI to resolve to 3, but stop at VHI as specified in instance */
-          if(strchr(result, '@')) {
+          if(strpbrk(result, "@%")) {
              my_strdup2(_ALLOC_ID_, &result,
-                translate3(result, 0, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
+                translate3(result, inst, 1, xctx->inst[inst].prop_ptr, parent_prop_ptr, template, NULL, &res));
           }
         }
         if(res) my_free(_ALLOC_ID_, &res);
       }
       my_strdup2(_ALLOC_ID_, &result, tcl_hook2(result)); /* tcl evaluation if tcleval(....) */
-      if(is_expr(result)) {
-        my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
-      }
-      dbg(1, "print_verilog_primitive(): after  translate3() result=%s\n", result);
+      my_strdup2(_ALLOC_ID_, &result, eval_expr(result));
+      dbg(1, ("print_verilog_primitive(): after  translate3() result=%s\n", result));
     }
     if(result) fprintf(fd, "%s", result);
     fputc('\n',fd);
@@ -3811,6 +3921,8 @@ void print_verilog_element(FILE *fd, int inst)
  const char *fmt_attr = NULL;
  Int_hashtable table = {NULL, 0};
  const char *fmt;
+ char *pin_name = NULL;
+ char *tr_name = NULL;
 
  fmt_attr = xctx->format ? xctx->format : "verilog_format";
 
@@ -3857,7 +3969,7 @@ void print_verilog_element(FILE *fd, int inst)
  my_strdup(_ALLOC_ID_, &generic_type, get_tok_value(xctx->sym[xctx->inst[inst].ptr].prop_ptr,"generic_type",0));
  s=xctx->inst[inst].prop_ptr;
 /* print instance  subckt */
- dbg(2, "print_verilog_element(): printing inst name & subcircuit name\n");
+ dbg(2, ("print_verilog_element(): printing inst name & subcircuit name\n"));
  fprintf(fd, "%s\n", sanitize(symname));
  my_free(_ALLOC_ID_, &symname);
  /* -------- print generics passed as properties */
@@ -3880,8 +3992,8 @@ void print_verilog_element(FILE *fd, int inst)
   else if( state==TOK_SEP && !space) state=TOK_VALUE;
   else if( state==TOK_VALUE && space && !quote) state=TOK_END;
 
-  STR_ALLOC(&value, value_pos, &sizeval);
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &value, value_pos, &sizeval);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) token[token_pos++]=(char)c;
   else if(state==TOK_VALUE)
   {
@@ -3898,7 +4010,7 @@ void print_verilog_element(FILE *fd, int inst)
    value[value_pos]='\0';
    value_pos=0;
    get_tok_value(template, token, 0);
-   dbg(1, "token=%s, extra=%s\n", token, extra);
+   dbg(1, ("token=%s, extra=%s\n", token, extra));
    if(strcmp(token, "name") && xctx->tok_size && (!extra || !strstr(extra, token))) {
      if(value[0] != '\0') /* token has a value */
      {
@@ -3934,12 +4046,16 @@ void print_verilog_element(FILE *fd, int inst)
  /* -------- end print generics passed as properties */
 
 /* print instance name */
- if( (lab = expandlabel(name, &tmp)) != NULL)
+
+ translate3(name, inst, 1, xctx->currsch > 0 ? xctx->hier_attr[xctx->currsch - 1].prop_ptr : NULL,
+           NULL, NULL, NULL, &tr_name);
+ if( (lab = expandlabel(eval_expr(tr_name), &tmp)) != NULL)
    fprintf(fd, "---- instance %s (\n", lab );
  else  /*  name in some strange format, probably an error */
-   fprintf(fd, "---- instance %s (\n", name );
+   fprintf(fd, "---- instance %s (\n", tr_name );
 
-  dbg(2, "print_verilog_element(): printing port maps \n");
+ my_free(_ALLOC_ID_, &tr_name);
+  dbg(2, ("print_verilog_element(): printing port maps \n"));
  /* print port map */
  tmp=0;
  int_hash_init(&table, 37);
@@ -3947,17 +4063,38 @@ void print_verilog_element(FILE *fd, int inst)
  {
    xSymbol *ptr = xctx->inst[inst].ptr + xctx->sym;
    if(strboolcmp(get_tok_value(ptr->rect[PINLAYER][i].prop_ptr,"verilog_ignore",0), "true")) {
-     const char *name = get_tok_value(ptr->rect[PINLAYER][i].prop_ptr, "name", 0);
-     if(!int_hash_lookup(&table, name, 1, XINSERT_NOREPLACE)) {
+     char *res = NULL;
+     my_strdup2(_ALLOC_ID_, &pin_name, get_tok_value(ptr->rect[PINLAYER][i].prop_ptr, "name", 0));
+     translate3( pin_name, -1, 1, xctx->inst[inst].prop_ptr, NULL, NULL, NULL, &res);
+     translate3( res, -1, 1, xctx->currsch > 0 ? xctx->hier_attr[xctx->currsch - 1].prop_ptr : NULL,
+       NULL, NULL, NULL, &pin_name);
+     my_strdup2(_ALLOC_ID_, &pin_name, eval_expr(pin_name));
+     my_free(_ALLOC_ID_, &res);
+     if(!int_hash_lookup(&table, pin_name, 1, XINSERT_NOREPLACE)) {
        if( (str_ptr =  net_name(inst,i, &multip, 0, 1)) )
        {
-         if(tmp) fprintf(fd,"\n");
-         fprintf(fd, "  ?%d %s %s ", multip, get_tok_value(ptr->rect[PINLAYER][i].prop_ptr,"name",0), str_ptr);
-         tmp=1;
+        if(strchr(pin_name, ',') && !strchr(pin_name , '[')) {
+          int num = count_items(pin_name, ",", "");
+          int k;
+          for(k = 0; k < num; k++) {
+            char *p = NULL;
+            char *n;
+            my_strdup2(_ALLOC_ID_, &p, find_nth(pin_name, ",", "", 0, k+1));
+            n = find_nth(str_ptr, ",", "", 0, k+1);
+            fprintf(fd, "  ?1 %s %s ", p, n);
+            my_free(_ALLOC_ID_, &p);
+            tmp = 1;
+          }
+        } else {
+          if(tmp) fprintf(fd,"\n");
+          fprintf(fd, "  ?%d %s %s ", multip, pin_name, str_ptr);
+          tmp=1;
+        }
        }
      }
    }
  }
+ if(pin_name) my_free(_ALLOC_ID_, &pin_name);
  int_hash_free(&table);
  if(v_extra) {
    const char *val;
@@ -3975,7 +4112,7 @@ void print_verilog_element(FILE *fd, int inst)
 
 
  fprintf(fd, "\n);\n\n");
- dbg(2, "print_verilog_element(): ------- end ------ \n");
+ dbg(2, ("print_verilog_element(): ------- end ------ \n"));
  my_free(_ALLOC_ID_, &name);
  my_free(_ALLOC_ID_, &generic_type);
  my_free(_ALLOC_ID_, &template);
@@ -4045,8 +4182,8 @@ const char *net_name(int i, int j, int *multip, int hash_prefix_unnamed_net, int
    {
      /* get unnamed node multiplicity ( minimum multip found in circuit) */
      *multip = get_unnamed_node(3, 0, atoi((xctx->inst[i].node[j])+4) );
-     dbg(2, "net_name(): node = %s  n=%d multip=%d\n",
-     xctx->inst[i].node[j], atoi(xctx->inst[i].node[j]), *multip);
+     dbg(2, ("net_name(): node = %s  n=%d multip=%d\n",
+     xctx->inst[i].node[j], atoi(xctx->inst[i].node[j]), *multip));
      if(hash_prefix_unnamed_net) {
        if(*multip>1)   /* unnamed is a bus */
          my_snprintf(str_node, S(str_node), "%s_[%d..0]", (xctx->inst[i].node[j]), *multip-1);
@@ -4064,8 +4201,23 @@ const char *net_name(int i, int j, int *multip, int hash_prefix_unnamed_net, int
    }
    else
    {
-     expandlabel(
-        get_tok_value(xctx->sym[xctx->inst[i].ptr].rect[PINLAYER][j].prop_ptr,"name",0), multip);
+     char *pin_name = NULL;
+     char *tr_pin_name = NULL;
+
+     my_strdup2(_ALLOC_ID_, &pin_name,
+       get_tok_value(xctx->sym[xctx->inst[i].ptr].rect[PINLAYER][j].prop_ptr,"name",0));
+
+     translate3(pin_name, -1, 1, xctx->inst[i].prop_ptr, NULL, NULL, NULL, &tr_pin_name);
+     for(k = xctx->currsch - 1; k >= 0; k--) {
+       if(!strpbrk(tr_pin_name, "@%")) break;
+       translate3(tr_pin_name, -1, 1, xctx->hier_attr[k].prop_ptr, NULL, NULL, NULL, &tr_pin_name);
+     }
+     my_strdup2(_ALLOC_ID_, &tr_pin_name, eval_expr(tr_pin_name));
+     dbg(1, ("net_name(): pin_name=%s, tr_pin_name=%s\n", pin_name, tr_pin_name));
+     expandlabel(tr_pin_name, multip);
+     
+     my_free(_ALLOC_ID_, &tr_pin_name);
+     my_free(_ALLOC_ID_, &pin_name);
      return expandlabel(xctx->inst[i].node[j], &tmp);
    }
  }
@@ -4127,6 +4279,39 @@ char *trim_chars(const char *str, const char *sep)
   }
   last[1] = '\0';
   return ptr;
+}
+
+/* find position of 'n'-th unescaped and unquoted separator character indicated in 'sep' list
+ * in the string 'str'. First occurrence is found with n = 1.
+ * 'quotechar' is a list of quoting characters (like: "\"'") 
+ * If no matching separator is found return -1
+ */
+ssize_t find_unescaped_sep(const char *str, const char *sep, const char *quotechar, int n)
+{
+  const char *ptr = str;
+  int escape = 0;
+  int quote = 0;
+  int index = 0;
+  char c;
+
+  if(n == 0) n = 1; /* n==0 is not accepted. First occurrence is 1 */
+  while((c = *ptr++)) {
+    if(c == '\\' && !escape) {
+      escape = 1;
+      continue;
+    }
+    else if(strchr(quotechar, c) && !escape) {
+      quote = !quote;
+      continue;
+    }
+    if(strchr(sep, c) && !quote && !escape) {
+      index++;
+      if(index == n) break;
+    }
+    escape = 0;
+  }
+  if(index == n) return (ssize_t) (ptr - str - 1);
+  return (ssize_t) -1;
 }
 
 /* find nth field in str separated by sep. 1st field is position 1
@@ -4241,14 +4426,14 @@ static char *get_pin_attr(const char *token, int inst, int engineering)
           my_strdup2(_ALLOC_ID_, &net, net_name(inst, n, &multip, 0, 0));
           if(multip == 1 && net && net[0]) {
             char *rn;
-            dbg(1, "get_pin_attr() spice_get_voltage: inst=%d\n", inst);
-            dbg(1, "                                  net=%s\n", net);
+            dbg(1, ("get_pin_attr() spice_get_voltage: inst=%d\n", inst));
+            dbg(1, ("                                  net=%s\n", net));
             rn = resolved_net(net);
             if(rn) {
               my_strdup2(_ALLOC_ID_, &fqnet, rn);
               if(rn) my_free(_ALLOC_ID_, &rn);
               strtolower(fqnet);
-              dbg(1, "get_pin_attr() @spice_get_voltage: fqnet=%s start_level=%d\n", fqnet, start_level);
+              dbg(1, ("get_pin_attr() @spice_get_voltage: fqnet=%s start_level=%d\n", fqnet, start_level));
               idx = get_raw_index(fqnet, NULL);
               if(idx >= 0) {
                 val = xctx->raw->cursor_b_val[idx];
@@ -4260,7 +4445,7 @@ static char *get_pin_attr(const char *token, int inst, int engineering)
                 valstr = engineering? dtoa_eng(val, xctx->ev_precision) : dtoa(val);
               }
               my_strdup2(_ALLOC_ID_, &pin_attr_value, valstr);
-              dbg(1, "inst %d, net=%s, fqnet=%s idx=%d valstr=%s\n", inst,  net, fqnet, idx, valstr);
+              dbg(1, ("inst %d, net=%s, fqnet=%s idx=%d valstr=%s\n", inst,  net, fqnet, idx, valstr));
               if(fqnet) my_free(_ALLOC_ID_, &fqnet);
             }
           }
@@ -4272,7 +4457,7 @@ static char *get_pin_attr(const char *token, int inst, int engineering)
     /* @#n:resolved_net attribute (n = pin number or name) will translate to hierarchy-resolved net */
     if(!pin_attr_value && !strcmp(pin_attr, "resolved_net")) {
       char *rn = NULL;
-      dbg(1, "translate(): resolved_net: %s, symbol %s\n", xctx->current_name, xctx->inst[inst].name);
+      dbg(1, ("translate(): resolved_net: %s, symbol %s\n", xctx->current_name, xctx->inst[inst].name));
       prepare_netlist_structs(0);
       if(xctx->inst[inst].node && xctx->inst[inst].node[n]) {
         rn = resolved_net(xctx->inst[inst].node[n]);
@@ -4315,7 +4500,7 @@ static char *get_pin_attr(const char *token, int inst, int engineering)
   }
   my_free(_ALLOC_ID_, &pin_attr);
   my_free(_ALLOC_ID_, &pin_num_or_name);
-  dbg(1, "get_pin_attr(): returning value=%s\n", value);
+  dbg(1, ("get_pin_attr(): returning value=%s\n", value));
   return value;
 }
 
@@ -4359,11 +4544,11 @@ char *spice_get_node(const char *token)
     double val = 0.0;
     const char *valstr;
 
-    dbg(1, "token=%s\n", token);
+    dbg(1, ("spice_get_node(): token=%s\n", token));
     node = my_malloc(_ALLOC_ID_, strlen(token) + 1);
     n = sscanf(pos, "%*[^ ] %[^ ]%c", node, &sp);
     len = strlen(node);
-    dbg(1, "node=%s, n=%d, sp=|%c|\n", node, n, sp);
+    dbg(1, ("node=%s, n=%d, sp=|%c|\n", node, n, sp));
     idx = get_raw_index(node, NULL);
     if(idx >= 0) {
       val = xctx->raw->cursor_b_val[idx];
@@ -4377,15 +4562,15 @@ char *spice_get_node(const char *token)
        * @spice_get_node(...) patterns */
       valstr = dtoa_eng(val, xctx->ev_precision);
     }
-    dbg(1, "valstr=%s\n", valstr);
+    dbg(1, ("valstr=%s\n", valstr));
     my_strdup2(_ALLOC_ID_, &token2, str_replace(token, "@spice_get_node ", "", 0, 1));
-    dbg(1, "token2=%s\n", token2);
+    dbg(1, ("token2=%s\n", token2));
     if(n == 2 && sp == ' ') {
       node[len] = ' ';
       node[len + 1] = '\0';
     }
     my_strdup2(_ALLOC_ID_, &s, str_replace(token2, node, valstr, 0, 1));
-    dbg(1, "s=%s\n", s);
+    dbg(1, ("s=%s\n", s));
     my_free(_ALLOC_ID_, &token2);
     my_free(_ALLOC_ID_, &node);
     return s;
@@ -4465,7 +4650,7 @@ char *get_fqdevice(const char *param, int modelparam, const char *instname)
   } else {
     my_snprintf(fqdev, len, "i(%s%s)", path, dev);
   }
-  dbg(1, "fqdev=%s\n", fqdev);
+  dbg(1, ("fqdev=%s\n", fqdev));
   strtolower(fqdev);
   idx = get_raw_index(fqdev, NULL);
   /* special handling for resistors that are converted to b sources:
@@ -4477,7 +4662,7 @@ char *get_fqdevice(const char *param, int modelparam, const char *instname)
     } else {
       my_snprintf(fqdev, len, "i(@b%s[i])", dev);
     }
-    dbg(1, "fqdev=%s\n", fqdev);
+    dbg(1, ("fqdev=%s\n", fqdev));
   }
 
 
@@ -4487,11 +4672,134 @@ char *get_fqdevice(const char *param, int modelparam, const char *instname)
 }
 
 
-static void handle_spice_get_voltage2(int inst, char *instname, char *token,
+void substitute_predefined_token(char **token, int inst, int engineering)
+{
+  const char *tmp_sym_name, *value;
+  char file_name[PATH_MAX];
+  struct tm *tm;
+  struct stat time_buf;
+  char date[200];
+
+      if(inst >= 0 && strcmp(*token,"@symref")==0) {
+        tmp_sym_name = get_sym_name(inst, 9999, 1, 0);
+        tmp_sym_name=tmp_sym_name ? tmp_sym_name : "";
+        my_strdup2(_ALLOC_ID_, token, tmp_sym_name);
+      } else if(inst >= 0 && strcmp(*token,"@lvs_ignore")==0) {
+        char *lvs = tclgetboolvar("lvs_ignore") ? "1" : "0";
+        my_strdup2(_ALLOC_ID_, token, lvs);
+      } else if(inst >= 0 && strcmp(*token,"@symname")==0) {
+        tmp_sym_name = get_sym_name(inst, 0, 0, 0);
+        tmp_sym_name=tmp_sym_name ? tmp_sym_name : "";
+        dbg(1, ("substitute_predefined_token(): tmp_sym_name = %s\n", tmp_sym_name));
+        my_strdup2(_ALLOC_ID_, token, tmp_sym_name);
+      } else if(strcmp(*token,"@path")==0) {
+        const char *path = xctx->sch_path[xctx->currsch] + 1;
+        int start_level = sch_waves_loaded(), skip = 0;
+        if(start_level == -1) start_level = 0;
+        /* skip path components that are above the level where raw file was loaded */
+        while(*path && skip < start_level) {
+          if(*path == '.') skip++;
+          ++path;
+        }
+        my_strdup2(_ALLOC_ID_, token, path);
+      } else if(inst >= 0 && strcmp(*token,"@symname_ext")==0) {
+        tmp_sym_name = get_sym_name(inst, 0, 1, 0);
+        tmp_sym_name=tmp_sym_name ? tmp_sym_name : "";
+        my_strdup2(_ALLOC_ID_, token,  tmp_sym_name);
+      /* recognize single pins 15112003 */
+      } else if(inst >= 0 && (*token)[0]=='@' && (*token)[1]=='@' && xctx->inst[inst].ptr >= 0) {
+        int i, multip;
+        int no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
+        prepare_netlist_structs(0);
+        for(i=0;i<no_of_pins; ++i) {
+          char *prop = (xctx->inst[inst].ptr + xctx->sym)->rect[PINLAYER][i].prop_ptr;
+          if (!strcmp( get_tok_value(prop,"name",0), (*token)+2)) {
+            if(strboolcmp(get_tok_value(prop,"spice_ignore",0), "true")) {
+              const char *str_ptr =  net_name(inst,i, &multip, 0, 0);
+              my_strdup2(_ALLOC_ID_, token, str_ptr);
+            }
+            break;
+          }
+        }
+      } else if(inst >= 0 && (*token)[0]=='@' && (*token)[1]=='#') {
+        value = get_pin_attr(*token, inst, engineering);
+        if(value) {
+          my_strdup2(_ALLOC_ID_, token, value);
+          my_free(_ALLOC_ID_, &value);
+        }
+      } else if(inst >= 0 && strcmp(*token,"@sch_last_modified")==0 && xctx->inst[inst].ptr >= 0) {
+        get_sch_from_sym(file_name, xctx->inst[inst].ptr + xctx->sym, inst, 0);
+        if(!stat(file_name , &time_buf)) {
+          tm=localtime(&(time_buf.st_mtime) );
+          strftime(date, sizeof(date), "%Y-%m-%d  %H:%M:%S", tm);
+          my_strdup2(_ALLOC_ID_, token, date);
+        }
+      } else if(inst >= 0 && strcmp(*token,"@sym_last_modified")==0) {
+        my_strncpy(file_name, abs_sym_path(tcl_hook2(xctx->inst[inst].name), ""), S(file_name));
+        if(!stat(file_name , &time_buf)) {
+          tm=localtime(&(time_buf.st_mtime) );
+          strftime(date, sizeof(date), "%Y-%m-%d  %H:%M:%S", tm);
+          my_strdup2(_ALLOC_ID_, token, date);
+        }
+      } else if(strcmp(*token,"@time_last_modified")==0) {
+        my_strncpy(file_name, abs_sym_path(xctx->sch[xctx->currsch], ""), S(file_name));
+        if(!stat(file_name , &time_buf)) {
+          tm=localtime(&(time_buf.st_mtime) );
+          strftime(date, sizeof(date), "%Y-%m-%d  %H:%M:%S", tm);
+          my_strdup2(_ALLOC_ID_, token, date);
+        }
+      } else if(strcmp(*token,"@schname_ext")==0) {
+        my_strdup2(_ALLOC_ID_, token, xctx->current_name);
+      } else if(strcmp(*token,"@schname")==0) {
+        const char *schname = get_cell(xctx->current_name, 0);
+        my_strdup2(_ALLOC_ID_, token, schname);
+      } else if(strcmp(*token,"@index")==0) {
+        const char *index = my_itoa(inst);
+        my_strdup2(_ALLOC_ID_, token, index);
+      } else if(strcmp(*token,"@topschname")==0)  {
+         const char *topsch;
+         topsch = get_trailing_path(xctx->sch[0], 0, 1);
+         my_strdup2(_ALLOC_ID_, token, topsch);
+      } else if(inst >= 0 && strcmp(*token,"@prop_ptr")==0 && xctx->inst[inst].prop_ptr) {
+        my_strdup2(_ALLOC_ID_, token, xctx->inst[inst].prop_ptr);
+      }
+      else if(strcmp(*token,"@schvhdlprop")==0 && xctx->schvhdlprop)
+      {
+        my_strdup2(_ALLOC_ID_, token, xctx->schvhdlprop);
+      }
+
+      else if(strcmp(*token,"@schspectreprop")==0 && xctx->schspectreprop)
+      {
+        my_strdup2(_ALLOC_ID_, token, xctx->schspectreprop);
+      }
+
+      else if(strcmp(*token,"@schprop")==0 && xctx->schprop)
+      {
+        my_strdup2(_ALLOC_ID_, token, xctx->schprop);
+      }
+
+      else if(strcmp(*token,"@schsymbolprop")==0 && xctx->schsymbolprop)
+      {
+        my_strdup2(_ALLOC_ID_, token, xctx->schsymbolprop);
+      }
+
+      else if(strcmp(*token,"@schtedaxprop")==0 && xctx->schtedaxprop)
+      {
+        my_strdup2(_ALLOC_ID_, token, xctx->schtedaxprop);
+      }
+
+      else if(strcmp(*token,"@schverilogprop")==0 && xctx->schverilogprop)
+      {
+        my_strdup2(_ALLOC_ID_, token, xctx->schverilogprop);
+      }
+}
+
+static const char *handle_spice_get_voltage2(int inst, char *instname, char *token,
        char **result, size_t *result_pos, size_t *size)
 {
   int start_level; /* hierarchy level where waves were loaded */
   int live = tclgetboolvar("live_cursor2_backannotate");
+  const char *valstr = "";
   if(live && (start_level = sch_waves_loaded()) >= 0 && xctx->raw->annot_p>=0) {
     char *fqnet = NULL;
     const char *path =  xctx->sch_path[xctx->currsch] + 1;
@@ -4500,7 +4808,6 @@ static void handle_spice_get_voltage2(int inst, char *instname, char *token,
     size_t len;
     int idx, n, multip;
     double val = 0.0;
-    const char *valstr;
     size_t tmp = strlen(token) + 1;
     if(path) {
       int skip = 0;
@@ -4514,7 +4821,7 @@ static void handle_spice_get_voltage2(int inst, char *instname, char *token,
       expandlabel(net, &multip);
       if(n == 1 && multip == 1) {
         len = strlen(path) + strlen(instname) + strlen(net) + 2;
-        dbg(1, "net=%s\n", net);
+        dbg(1, ("net=%s\n", net));
         fqnet = my_malloc(_ALLOC_ID_, len);
 
 
@@ -4530,7 +4837,7 @@ static void handle_spice_get_voltage2(int inst, char *instname, char *token,
           my_snprintf(fqnet, len, "%s%s.%s", path, instname, net);
         }
         strtolower(fqnet);
-        dbg(0, "translate(): inst=%d, net=%s, fqnet=%s start_level=%d\n", inst, net, fqnet, start_level);
+        dbg(1, ("translate(): inst=%d, net=%s, fqnet=%s start_level=%d\n", inst, net, fqnet, start_level));
         idx = get_raw_index(fqnet, NULL);
         if(idx >= 0) {
           val = xctx->raw->cursor_b_val[idx];
@@ -4550,24 +4857,21 @@ static void handle_spice_get_voltage2(int inst, char *instname, char *token,
           len = xctx->tok_size;
         }
         if(len) {
-          len = strlen(valstr);
-          STR_ALLOC(result, len + *result_pos, size);
-          memcpy(*result+*result_pos, valstr, len+1);
-          *result_pos += len;
         }
-        dbg(1, "instname %s, net=%s, fqnet=%s idx=%d valstr=%s\n", instname,  net, fqnet, idx, valstr);
+        dbg(1, ("instname %s, net=%s, fqnet=%s idx=%d valstr=%s\n", instname,  net, fqnet, idx, valstr));
         my_free(_ALLOC_ID_, &fqnet);
       }
       my_free(_ALLOC_ID_, &net);
     }
   }
+  return valstr;
 }
 
-static void handle_spice_get_voltage(int inst, int engineering,
-             char **result, size_t *result_pos, size_t *size)
+static const char *handle_spice_get_voltage(int inst, int engineering)
 {
   int start_level; /* hierarchy level where waves were loaded */
   int live = tclgetboolvar("live_cursor2_backannotate");
+  const char *valstr = "";
   if(live && (start_level = sch_waves_loaded()) >= 0 && xctx->raw->annot_p>=0) {
     int multip;
     int no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
@@ -4578,7 +4882,6 @@ static void handle_spice_get_voltage(int inst, int engineering,
       size_t len;
       int idx;
       double val = 0.0;
-      const char *valstr;
       if(path) {
         prepare_netlist_structs(0);
         if(xctx->inst[inst].lab) {
@@ -4589,14 +4892,14 @@ static void handle_spice_get_voltage(int inst, int engineering,
         }
         if(multip == 1 && net && net[0]) {
           char *rn;
-          dbg(1, "translate() @spice_get_voltage: inst=%d\n", inst);
-          dbg(1, "                                net=%s\n", net);
+          dbg(1, ("translate() @spice_get_voltage: inst=%d\n", inst));
+          dbg(1, ("                                net=%s\n", net));
           rn = resolved_net(net);
           if(rn) {
             my_strdup2(_ALLOC_ID_, &fqnet, rn);
             if(rn) my_free(_ALLOC_ID_, &rn);
             strtolower(fqnet);
-            dbg(1, "translate() @spice_get_voltage: fqnet=%s start_level=%d\n", fqnet, start_level);
+            dbg(1, ("translate() @spice_get_voltage: fqnet=%s start_level=%d\n", fqnet, start_level));
             idx = get_raw_index(fqnet, NULL);
             if(idx >= 0) {
               val = xctx->raw->cursor_b_val[idx];
@@ -4614,12 +4917,8 @@ static void handle_spice_get_voltage(int inst, int engineering,
               len = xctx->tok_size;
             }
             if(len) {
-              len = strlen(valstr);
-              STR_ALLOC(result, len + *result_pos, size);
-              memcpy(*result+*result_pos, valstr, len+1);
-              *result_pos += len;
             }
-            dbg(1, "inst %d, net=%s, fqnet=%s idx=%d valstr=%s\n", inst,  net, fqnet, idx, valstr);
+            dbg(1, ("inst %d, net=%s, fqnet=%s idx=%d valstr=%s\n", inst,  net, fqnet, idx, valstr));
             if(fqnet) my_free(_ALLOC_ID_, &fqnet);
           }
         }
@@ -4627,13 +4926,15 @@ static void handle_spice_get_voltage(int inst, int engineering,
       }
     }
   }
+  return valstr;
 }
 
-static void handle_spice_get_current(char *instname, int engineering, int sim_is_ngspice, int sim_is_vacask,
-        char *token, char **result, size_t *result_pos, size_t *size)
+static const char *handle_spice_get_current(char *instname, int engineering, int sim_is_ngspice, int sim_is_vacask,
+        char *token)
 {
   int start_level; /* hierarchy level where waves were loaded */
   int live = tclgetboolvar("live_cursor2_backannotate");
+  const char *valstr = "";
   if(live && (start_level = sch_waves_loaded()) >= 0 && xctx->raw->annot_p>=0) {
     char *fqdev = NULL;
     const char *path =  xctx->sch_path[xctx->currsch] + 1;
@@ -4643,9 +4944,9 @@ static void handle_spice_get_current(char *instname, int engineering, int sim_is
     int idx;
     int error = 0;
     double val = 0.0;
-    const char *valstr;
     if(path) {
       int skip = 0;
+      dbg(1, ("handle_spice_get_current(): inst=%s\n", instname));
       /* skip path components that are above the level where raw file was loaded */
       while(*path && skip < start_level) {
         if(*path == '.') skip++;
@@ -4680,7 +4981,7 @@ static void handle_spice_get_current(char *instname, int engineering, int sim_is
         strtolower(dev);
         prefix=dev[0];
         len = strlen(path) + strlen(dev) + 40; /* some extra chars for i(..) wrapper */
-        dbg(1, "token=%s, dev=%s param=%s\n", token, dev, param ? param : "<NULL>");
+        dbg(1, ("token=%s, dev=%s param=%s\n", token, dev, param ? param : "<NULL>"));
         fqdev = my_malloc(_ALLOC_ID_, len);
         if(sim_is_ngspice) {
           int vsource = (prefix == 'v') || (prefix == 'e');
@@ -4717,7 +5018,7 @@ static void handle_spice_get_current(char *instname, int engineering, int sim_is
           my_snprintf(fqdev, len, "i(%s%s)", path, dev);
         }
         if(param) my_free(_ALLOC_ID_, &param);
-        dbg(1, "fqdev=%s\n", fqdev);
+        dbg(1, ("handle_spice_get_current(): fqdev=%s\n", fqdev));
         strtolower(fqdev);
         idx = get_raw_index(fqdev, NULL);
         if(idx >= 0) {
@@ -4732,7 +5033,7 @@ static void handle_spice_get_current(char *instname, int engineering, int sim_is
           } else {
             my_snprintf(fqdev, len, "i(@b%s[i])", dev);
           }
-          dbg(1, "fqdev=%s\n", fqdev);
+          dbg(1, ("handle_spice_get_current(): fqdev=%s\n", fqdev));
           idx = get_raw_index(fqdev, NULL);
           if(idx >= 0) {
             val = xctx->raw->cursor_b_val[idx];
@@ -4741,31 +5042,24 @@ static void handle_spice_get_current(char *instname, int engineering, int sim_is
         if(idx < 0) {
           valstr = "-";
           xctx->tok_size = 1;
-          len = 1;
         } else {
           valstr = engineering ? dtoa_eng(val, xctx->ev_precision) : dtoa(val);
-          len = xctx->tok_size;
         }
-        if(len) {
-          len = strlen(valstr);
-          STR_ALLOC(result, len + *result_pos, size);
-          memcpy(*result+*result_pos, valstr, len+1);
-          *result_pos += len;
-        }
-        dbg(1, "instname %s, dev=%s, fqdev=%s idx=%d valstr=%s\n", instname,  dev, fqdev, idx, valstr);
+        dbg(1, ("instname %s, dev=%s, fqdev=%s idx=%d valstr=%s\n", instname,  dev, fqdev, idx, valstr));
         my_free(_ALLOC_ID_, &fqdev);
         my_free(_ALLOC_ID_, &dev);
       } /* if(!error) */
     } /* if(path) */
   } /* (live && (start_level = sch_waves_loaded()) >= 0 && xctx->raw->annot_p>=0) */
+  return valstr;
 }
 
 
-static void handle_spice_get_diff_voltage(int inst, int engineering,
-             char **result, size_t *result_pos, size_t *size)
+static const char *handle_spice_get_diff_voltage(int inst, int engineering)
 {
   int start_level; /* hierarchy level where waves were loaded */
   int live = tclgetboolvar("live_cursor2_backannotate");
+  const char *valstr = "";
   if(live && (start_level = sch_waves_loaded()) >= 0 && xctx->raw->annot_p>=0) {
     int multip;
     int no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
@@ -4775,8 +5069,6 @@ static void handle_spice_get_diff_voltage(int inst, int engineering,
       const char *net1, *net2;
       size_t len;
       int idx1, idx2;
-      double val = 0.0, val1 = 0.0, val2 = 0.0;
-      const char *valstr;
       if(path) {
         int gnd1 = 0, gnd2 = 0;
         int skip = 0;
@@ -4788,18 +5080,18 @@ static void handle_spice_get_diff_voltage(int inst, int engineering,
         prepare_netlist_structs(0);
         net1 = net_name(inst, 0, &multip, 0, 0);
         len = strlen(path) + strlen(net1) + 1;
-        dbg(1, "net1=%s\n", net1);
+        dbg(1, ("net1=%s\n", net1));
         fqnet1 = my_malloc(_ALLOC_ID_, len);
         my_snprintf(fqnet1, len, "%s%s", path, net1);
         strtolower(fqnet1);
         net2 = net_name(inst, 1, &multip, 0, 0);
         len = strlen(path) + strlen(net2) + 1;
-        dbg(1, "net2=%s\n", net2);
+        dbg(1, ("net2=%s\n", net2));
         fqnet2 = my_malloc(_ALLOC_ID_, len);
         my_snprintf(fqnet2, len, "%s%s", path, net2);
         strtolower(fqnet2);
-        dbg(1, "translate(): fqnet1=%s start_level=%d\n", fqnet1, start_level);
-        dbg(1, "translate(): fqnet2=%s start_level=%d\n", fqnet2, start_level);
+        dbg(1, ("translate(): fqnet1=%s start_level=%d\n", fqnet1, start_level));
+        dbg(1, ("translate(): fqnet2=%s start_level=%d\n", fqnet2, start_level));
         if(!strcmp(fqnet1, "0") || !my_strcasecmp(fqnet1, "GND")) gnd1 = 1;
         if(!strcmp(fqnet2, "0") || !my_strcasecmp(fqnet2, "GND")) gnd2 = 1;
         idx1 = get_raw_index(fqnet1, NULL);
@@ -4811,39 +5103,32 @@ static void handle_spice_get_diff_voltage(int inst, int engineering,
         } else {
           double val1 = gnd1 ? 0.0 : xctx->raw->cursor_b_val[idx1];
           double val2 = gnd2 ? 0.0 : xctx->raw->cursor_b_val[idx2];
-          val = val1 - val2;
+          double val = val1 - val2;
           valstr = engineering ? dtoa_eng(val, xctx->ev_precision) : dtoa(val);
           len = xctx->tok_size;
         }
-        if(len) {
-          len = strlen(valstr);
-          STR_ALLOC(result, len + *result_pos, size);
-          memcpy(*result + *result_pos, valstr, len+1);
-          *result_pos += len;
-        }
-        dbg(1, "inst %d, fqnet1=%s fqnet2=%s idx1=%d idx2=%d, val1=%g val2=%g valstr=%s\n",
-            inst, fqnet1, fqnet2, idx1, idx2, val1, val2, valstr);
         my_free(_ALLOC_ID_, &fqnet1);
         my_free(_ALLOC_ID_, &fqnet2);
       }
     }
   }
+  return valstr;
 }
 
-
-static void handle_spice_get_current2(char *instname, int engineering, int sim_is_ngspice, int sim_is_vacask,
-        char *token, char **result, size_t *result_pos, size_t *size)
+static const char *handle_spice_get_current2(char *instname, int engineering, int sim_is_ngspice, int sim_is_vacask,
+        char *token)
 {
   int start_level; /* hierarchy level where waves were loaded */
   int live = tclgetboolvar("live_cursor2_backannotate");
+  const char *valstr = "";
   if(live && (start_level = sch_waves_loaded()) >= 0 && xctx->raw->annot_p>=0) {
     char *fqdev = NULL;
     const char *path =  xctx->sch_path[xctx->currsch] + 1;
     char *dev = NULL, *param = NULL;
     size_t len;
+    int modelparam = 0; /* 0: current, 1: modelparam, 2: modelvoltage */
     int idx, n = 0;
     double val = 0.0;
-    const char *valstr;
     size_t tmp = strlen(token) + 1;
     if(path) {
       int skip = 0;
@@ -4853,38 +5138,50 @@ static void handle_spice_get_current2(char *instname, int engineering, int sim_i
         ++path;
       }
       dev = my_malloc(_ALLOC_ID_, tmp);
-      dbg(1, "%s\n", token);
+      dbg(1, ("handle_spice_get_current2(): %s\n", token));
       if(!strncmp(token, "@spice_get_current(", 19)) {
         n = sscanf(token + 19, "%[^)]", dev);
       } else {
         param = my_malloc(_ALLOC_ID_, tmp);
         n = sscanf(token, "@spice_get_current_%[^(](%[^)]", param, dev);
-        dbg(1, "token=%s, param=%s, dev=%s\n", token, param, dev);
-        if(n < 2) {
+        if( n > 0 && n < 2) {
           my_free(_ALLOC_ID_, &param);
           n = sscanf(token, "@spice_get_current[^(](%[^)]", dev);
         }
+        if(n == 0) {
+          n = sscanf(token, "@spice_get_modelparam_%[^(](%[^)]", param, dev);
+          modelparam = 1;
+        }
+        if( n > 0 && n < 2) {
+          my_free(_ALLOC_ID_, &param);
+          n = sscanf(token, "@spice_get_modelparam[^(](%[^)]", dev);
+        }
+        dbg(1, ("handle_spice_get_current2(): token=%s, param=%s, dev=%s\n", token, param, dev));
       }
       if(n >= 1) {
+        char *iprefix = modelparam == 0 ? "i(" : modelparam == 1 ? "" : "v(";
+        char *ipostfix = modelparam == 1 ? "" : ")";
         strtolower(dev);
         len = strlen(path) + strlen(instname) +
               strlen(dev) + 21; /* some extra chars for i(..) wrapper */
-        dbg(1, "dev=%s\n", dev);
+        dbg(1, ("dev=%s\n", dev));
         fqdev = my_malloc(_ALLOC_ID_, len);
         if(sim_is_ngspice) {
           int prefix, vsource;
           char *prefix_ptr = strrchr(dev, '.'); /* last '.' in dev */
           if(prefix_ptr) prefix = prefix_ptr[1]; /* character after last '.' */
           else prefix=dev[0];
-          dbg(1, "prefix=%c, path=%s\n", prefix, path);
+          dbg(1, ("prefix=%c, path=%s\n", prefix, path));
           vsource = (prefix == 'v') || (prefix == 'e');
           if(vsource) {
             my_snprintf(fqdev, len, "i(%c.%s%s.%s)", prefix, path, instname, dev);
           } else if(prefix == 'q') {
-            my_snprintf(fqdev, len, "i(@%c.%s%s.%s[%s])", prefix, path, instname, dev, param ? param : "ic");
+            my_snprintf(fqdev, len, "%s@%c.%s%s.%s[%s]%s",
+                 iprefix,  prefix, path, instname, dev, param ? param : "ic", ipostfix);
           } else if(prefix == 'd' || prefix == 'm') {
-            my_snprintf(fqdev, len, "i(@%c.%s%s.%s[%s])", prefix, path, instname, dev, param ? param : "id");
-            dbg(1, "translate(): fqdev=%s\n", fqdev);
+            my_snprintf(fqdev, len, "%s@%c.%s%s.%s[%s]%s",
+                 iprefix, prefix, path, instname, dev, param ? param : "id", ipostfix);
+            dbg(1, ("translate(): fqdev=%s\n", fqdev));
           } else if(prefix == 'i') {
             my_snprintf(fqdev, len, "i(@%c.%s%s.%s[current])", prefix, path, instname, dev);
           } else {
@@ -4896,7 +5193,7 @@ static void handle_spice_get_current2(char *instname, int engineering, int sim_i
           my_snprintf(fqdev, len, "i(%s%s.%s)", path, instname, dev);
         }
         strtolower(fqdev);
-        dbg(1, "fqdev=%s\n", fqdev);
+        dbg(1, ("fqdev=%s\n", fqdev));
         idx = get_raw_index(fqdev, NULL);
         if(idx >= 0) {
           val = xctx->raw->cursor_b_val[idx];
@@ -4911,19 +5208,89 @@ static void handle_spice_get_current2(char *instname, int engineering, int sim_i
           valstr = dtoa_eng(val, xctx->ev_precision);
           len = xctx->tok_size;
         }
-        if(len) {
-          len = strlen(valstr);
-          STR_ALLOC(result, len + *result_pos, size);
-          memcpy(*result+*result_pos, valstr, len+1);
-          *result_pos += len;
-        }
-        dbg(1, "instname %s, dev=%s, fqdev=%s idx=%d valstr=%s\n", instname,  dev, fqdev, idx, valstr);
+        dbg(1, ("handle_spice_get_current2(): instname %s, dev=%s, fqdev=%s idx=%d valstr=%s\n",
+                instname,  dev, fqdev, idx, valstr));
         my_free(_ALLOC_ID_, &fqdev);
       } /* if(n == 1) */
       if(param) my_free(_ALLOC_ID_, &param);
       my_free(_ALLOC_ID_, &dev);
     } /* if(path) */
   } /* if((start_level = sch_waves_loaded()) >= 0 && xctx->raw->annot_p>=0) */
+  return valstr;
+}
+
+/* caller should free returned value when done */
+char *recursive_subst(const char *value, int symbol)
+{
+  char *value1 = NULL;
+  int i = xctx->currsch;
+  char *res = NULL;
+  Lcc *lcc = xctx->hier_attr;
+  dbg(1, ("\n\nrecursive_subst(): processing: %s\n", value));
+  my_strdup2(_ALLOC_ID_, &value1, value);
+  /* recursive substitution of value using parent level prop_ptr attributes */
+  while(i > 0) {
+    char *v = value1;
+    const char *tok;
+    if(v && v[0] == '@') v++;
+    tok = get_tok_value(lcc[i-1].prop_ptr, v, 0);
+    if(xctx->tok_size /* && tok[0] */) {
+      dbg(1, ("recursive_subst(): tok=%s\n", tok));
+      my_strdup2(_ALLOC_ID_, &value1, tok);
+    } else {
+      tok = get_tok_value(lcc[i-1].templ,  v, 0);
+      if(xctx->tok_size /* && tok[0] */) {
+        dbg(1, ("recursive_subst(): from parent template: tok=%s\n", tok));
+        my_strdup2(_ALLOC_ID_, &value1, tok);
+      }
+    }
+    dbg(1, ("  1 recursive_subst(): lcc[%d].prop_ptr=%s, value1=%s\n", i-1, lcc[i-1].prop_ptr, value1));
+    i--;
+  }
+  /* substitute remaing @params */
+  i = xctx->currsch;
+  while(i > 0) {
+    if(strpbrk(value1, "@%")) {
+      my_strdup2(_ALLOC_ID_, &value1, translate3(value1, -1, 1, lcc[i-1].prop_ptr, NULL, NULL, NULL, &res));
+      dbg(1, ("  2 recursive_subst(): lcc[%d].prop_ptr=%s, value1=%s\n", i-1, lcc[i-1].prop_ptr, value1));
+    } else {
+      break;
+    }
+   
+    i--;
+  }
+  /* substitute remaing @params */
+  i = xctx->currsch;
+  while(i > 0) {
+    if(strpbrk(value1, "@%")) {
+      my_strdup2(_ALLOC_ID_, &value1, translate3(value1, -1, 1, lcc[i-1].templ, NULL, NULL, NULL, &res));
+      dbg(1, ("  3 recursive_subst(): lcc[%d].prop_ptr=%s, value1=%s\n", i-1, lcc[i-1].prop_ptr, value1));
+    } else {
+      break;
+    }
+
+    i--;
+  }
+
+  if(symbol >= 0) {
+    const char *subst = get_tok_value(xctx->sym[symbol].prop_ptr, value1, 3);
+    if(xctx->tok_size) {
+      my_strdup2(_ALLOC_ID_, &value1, subst);
+    }
+  }
+
+  if(res) my_free(_ALLOC_ID_, &res);
+  /* my_strdup2(_ALLOC_ID_, &value1, eval_expr(value1)); */
+  dbg(1, ("\n\nrecursive_subst(): returning %s\n", value1));
+
+  #if 0
+  if(value1 && value1[0] == '@') {
+    /* still unresolved, return as empty string */
+    my_strdup2(_ALLOC_ID_, &value1, "");
+  }
+  #endif
+
+  return value1;
 }
 
 /* substitute given tokens in a string with their corresponding values */
@@ -4939,19 +5306,13 @@ const char *translate(int inst, const char *s, char **result)
   size_t tmp;
   register int c, state=TOK_BEGIN, space;
   char *token=NULL;
-  const char *tmp_sym_name;
   size_t sizetok=0;
   size_t result_pos=0, token_pos=0;
-  struct stat time_buf;
-  struct tm *tm;
-  char file_name[PATH_MAX];
   const char *value;
-  int escape=0, engineering = 0;
-  char date[200];
+  int escape=0, engineering = 0, parenthesis = 0;
   int sp_prefix;
-  int level;
-  Lcc *lcc;
   char *value1 = NULL;
+  char *value2 = NULL;
   int sim_is_ngspice, sim_is_vacask /*, sim_is_xyce */;
   char *instname = NULL;
   
@@ -4983,7 +5344,7 @@ const char *translate(int inst, const char *s, char **result)
   sp_prefix = tclgetboolvar("spiceprefix");
 
   if(inst >= xctx->instances) {
-    dbg(0, "translate(): instance number out of bounds: %d\n", inst);
+    info("translate(): instance number out of bounds: %d\n", inst);
     return empty;
   }
 
@@ -4993,161 +5354,49 @@ const char *translate(int inst, const char *s, char **result)
   sim_is_ngspice = tcleval("sim_is_ngspice")[0] == '1' ? 1 : 0;
   sim_is_vacask = tcleval("sim_is_vacask")[0] == '1' ? 1 : 0;
   /* sim_is_xyce = tcleval("sim_is_xyce")[0] == '1' ? 1 : 0; */
-  level = xctx->currsch;
-  lcc = xctx->hier_attr;
-  STR_ALLOC(result, result_pos, &size);
+  STR_ALLOC(_ALLOC_ID_, result, result_pos, &size);
   (*result)[0]='\0';
 
-  dbg(1, "translate(): substituting props in <%s>, instance <%s>\n", s ? s : "<NULL>" , instname);
+  dbg(1, ("translate(): substituting props in <%s>, instance <%s>\n", s ? s : "<NULL>" , instname));
 
   while(1)
   {
     c=*s++;
-    if(c=='\\') {
+    if(c=='\\' && !escape) {
       escape=1;
       c=*s++; /* do not remove: breaks translation of format strings in netlists (escaping %) */
     }
     else escape=0;
     space=SPACE(c);
     if( state==TOK_BEGIN && (c=='@' || c=='%' ) && !escape  ) state=TOK_TOKEN; /* 20161210 escape */
-    else if(state==TOK_TOKEN && token_pos > 1 &&
-       (
-         ( (space  || c == '%' || c == '@') && !escape ) ||
-         ( (!space && c != '%' && c != '@') && escape  )
-       )
-      ) state=TOK_SEP;
-
-    STR_ALLOC(&token, token_pos, &sizetok);
+    else if(state==TOK_TOKEN) {
+      if(c == '(' && !escape) parenthesis++;
+      if(c == ')' && !escape) parenthesis--;
+      if(token_pos > 1 && parenthesis == 0 && 
+         (
+           ( (space  || c == '%' || c == '@') && !escape ) ||
+           ( escape  )
+         )
+        ) state=TOK_SEP;
+    }
+    STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
     if(state==TOK_TOKEN) token[token_pos++]=(char)c;
     else if(state==TOK_SEP)
     {
       token[token_pos]='\0';
-      if(inst >= 0 && strcmp(token,"@symref")==0) {
-       tmp_sym_name = get_sym_name(inst, 9999, 1, 0);
-       tmp_sym_name=tmp_sym_name ? tmp_sym_name : "";
-       tmp=strlen(tmp_sym_name);
-       STR_ALLOC(result, tmp + result_pos, &size);
-       memcpy(*result+result_pos,tmp_sym_name, tmp+1);
-       result_pos+=tmp;
-      } else if(inst >= 0 && strcmp(token,"@lvs_ignore")==0) {
-       char *lvs = tclgetboolvar("lvs_ignore") ? "1" : "0";
-       tmp = strlen(lvs);
-       STR_ALLOC(result, tmp + result_pos, &size);
-       memcpy(*result+result_pos, lvs, tmp+1);
-       result_pos+=tmp;
-      } else if(inst >= 0 && strcmp(token,"@symname")==0) {
-       tmp_sym_name = get_sym_name(inst, 0, 0, 0);
-       tmp_sym_name=tmp_sym_name ? tmp_sym_name : "";
-       tmp=strlen(tmp_sym_name);
-       STR_ALLOC(result, tmp + result_pos, &size);
-       memcpy(*result+result_pos,tmp_sym_name, tmp+1);
-       result_pos+=tmp;
-      } else if(strcmp(token,"@path")==0) {
-       const char *path = xctx->sch_path[xctx->currsch] + 1;
-       int start_level = sch_waves_loaded(), skip = 0;
-       if(start_level == -1) start_level = 0;
+      my_strdup2(_ALLOC_ID_, &value1, token);
 
-       /* skip path components that are above the level where raw file was loaded */
-       while(*path && skip < start_level) {
-         if(*path == '.') skip++;
-         ++path;
-       }
+      dbg(1, ("translate(): 1 value1=%s\n", value1));
+      substitute_predefined_token(&value1, inst, engineering);
+      dbg(1, ("translate(): 2 value1=%s\n", value1));
 
-       tmp=strlen(path);
-       STR_ALLOC(result, tmp + result_pos, &size);
-       memcpy(*result+result_pos, path, tmp+1);
-       result_pos+=tmp;
-      } else if(inst >= 0 && strcmp(token,"@symname_ext")==0) {
-       tmp_sym_name = get_sym_name(inst, 0, 1, 0);
-       tmp_sym_name=tmp_sym_name ? tmp_sym_name : "";
-       tmp=strlen(tmp_sym_name);
-       STR_ALLOC(result, tmp + result_pos, &size);
-       memcpy(*result+result_pos,tmp_sym_name, tmp+1);
-       result_pos+=tmp;
-      /* recognize single pins 15112003 */
-      } else if(inst >= 0 && token[0]=='@' && token[1]=='@' && xctx->inst[inst].ptr >= 0) {
-        int i, multip;
-        int no_of_pins= (xctx->inst[inst].ptr + xctx->sym)->rects[PINLAYER];
-        prepare_netlist_structs(0);
-        for(i=0;i<no_of_pins; ++i) {
-          char *prop = (xctx->inst[inst].ptr + xctx->sym)->rect[PINLAYER][i].prop_ptr;
-          if (!strcmp( get_tok_value(prop,"name",0), token+2)) {
-            if(strboolcmp(get_tok_value(prop,"spice_ignore",0), "true")) {
-              const char *str_ptr =  net_name(inst,i, &multip, 0, 0);
-              tmp = strlen(str_ptr);
-              STR_ALLOC(result, tmp + result_pos, &size);
-              memcpy(*result+result_pos,str_ptr, tmp+1);
-              result_pos+=tmp;
-            }
-            break;
-          }
-        }
-      } else if(inst >= 0 && token[0]=='@' && token[1]=='#') {
-        value = get_pin_attr(token, inst, engineering);
-        if(value) {
-          tmp=strlen(value);
-          STR_ALLOC(result, tmp + result_pos, &size);
-          memcpy(*result+result_pos, value, tmp+1);
-          result_pos+=tmp;
-          my_free(_ALLOC_ID_, &value);
-        }
-      } else if(inst >= 0 && strcmp(token,"@sch_last_modified")==0 && xctx->inst[inst].ptr >= 0) {
 
-       get_sch_from_sym(file_name, xctx->inst[inst].ptr + xctx->sym, inst, 0);
-       if(!stat(file_name , &time_buf)) {
-         tm=localtime(&(time_buf.st_mtime) );
-         tmp=strftime(date, sizeof(date), "%Y-%m-%d  %H:%M:%S", tm);
-         STR_ALLOC(result, tmp + result_pos, &size);
-         memcpy(*result+result_pos, date, tmp+1);
-         result_pos+=tmp;
-       }
-      } else if(inst >= 0 && strcmp(token,"@sym_last_modified")==0) {
-       my_strncpy(file_name, abs_sym_path(tcl_hook2(xctx->inst[inst].name), ""), S(file_name));
-       if(!stat(file_name , &time_buf)) {
-         tm=localtime(&(time_buf.st_mtime) );
-         tmp=strftime(date, sizeof(date), "%Y-%m-%d  %H:%M:%S", tm);
-         STR_ALLOC(result, tmp + result_pos, &size);
-         memcpy(*result+result_pos, date, tmp+1);
-         result_pos+=tmp;
-       }
-      } else if(strcmp(token,"@time_last_modified")==0) {
-       my_strncpy(file_name, abs_sym_path(xctx->sch[xctx->currsch], ""), S(file_name));
-       if(!stat(file_name , &time_buf)) {
-         tm=localtime(&(time_buf.st_mtime) );
-         tmp=strftime(date, sizeof(date), "%Y-%m-%d  %H:%M:%S", tm);
-         STR_ALLOC(result, tmp + result_pos, &size);
-         memcpy(*result+result_pos, date, tmp+1);
-         result_pos+=tmp;
-       }
-      } else if(strcmp(token,"@schname_ext")==0) {
-        /* tmp=strlen(xctx->sch[xctx->currsch]);*/
-        tmp = strlen(xctx->current_name);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        /* memcpy(result+result_pos,xctx->sch[xctx->currsch], tmp+1); */
-        memcpy(*result+result_pos, xctx->current_name, tmp+1);
-        result_pos+=tmp;
-      } else if(strcmp(token,"@schname")==0) {
-        const char *schname = get_cell(xctx->current_name, 0);
-        tmp = strlen(schname);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos, schname, tmp+1);
-        result_pos+=tmp;
-      } else if(strcmp(token,"@topschname")==0)  {
-         const char *topsch;
-         topsch = get_trailing_path(xctx->sch[0], 0, 1);
-         tmp = strlen(topsch);
-         STR_ALLOC(result, tmp + result_pos, &size);
-         memcpy(*result+result_pos, topsch, tmp+1);
-         result_pos+=tmp;
-      } else if(inst >= 0 && strcmp(token,"@prop_ptr")==0 && xctx->inst[inst].prop_ptr) {
-        tmp=strlen(xctx->inst[inst].prop_ptr);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos,xctx->inst[inst].prop_ptr, tmp+1);
-        result_pos+=tmp;
-      }
-      else if(inst >= 0 && strcmp(token,"@spice_get_voltage")==0 && xctx->inst[inst].ptr >= 0)
+
+      /* ============ SPICE BACKANNOTATION HANDLING ================ */
+      if(inst >= 0 && strcmp(value1,"@spice_get_voltage")==0 && xctx->inst[inst].ptr >= 0)
       {
-        handle_spice_get_voltage(inst, engineering, result, &result_pos, &size);
+        my_strdup2(_ALLOC_ID_, &value1, 
+           handle_spice_get_voltage(inst, engineering));
       }
 
       /* copy as is: processed by spice_get_node() later
@@ -5168,15 +5417,14 @@ const char *translate(int inst, const char *s, char **result)
        *
        * caveats: only one @spice_get_node is allowed in a string
        */
-      else if(strcmp(token,"@spice_get_node")==0 )
+      else if(strcmp(value1,"@spice_get_node")==0 )
       {
-        STR_ALLOC(result, 15 + result_pos, &size);
-        memcpy(*result+result_pos, token, 16);
-        result_pos += 15;
+        /* return  value1 as is, processed later ... */
       }
-      else if(strncmp(token,"@spice_get_voltage(", 19)==0 )
+      else if(strncmp(value1,"@spice_get_voltage(", 19)==0 )
       {
-        handle_spice_get_voltage2(inst, instname, token, result, &result_pos, &size);
+        my_strdup2(_ALLOC_ID_, &value1, 
+           handle_spice_get_voltage2(inst, instname, value1, result, &result_pos, &size));
       }
       /* @spice_get_current(...) or @spice_get_current_<param>(...)
        * @spice_get_modelparam(...) or @spice_get_modelparam_<param>(...)
@@ -5185,187 +5433,129 @@ const char *translate(int inst, const char *s, char **result)
        * Only @spice_get_current(...) and @spice_get_current_<param>(...) are processed
        * the other types are ignored */
       #ifdef __unix__
-      else if(!regexec(get_sp_cur, token, 0 , NULL, 0) )
+      else if(!regexec(get_sp_cur, value1, 0 , NULL, 0) )
       # else
-      else if ((win_regexec(NULL/*options*/, "^@spice_get_(current|modelparam|modelvoltage)(_[a-zA-Z][a-zA-Z0-9_]*)*\\(", token)))
+      else if ((win_regexec(NULL/*options*/,
+              "^@spice_get_(current|modelparam|modelvoltage)(_[a-zA-Z][a-zA-Z0-9_]*)*\\(", value1)))
       #endif
       {
-        handle_spice_get_current2(instname, engineering, sim_is_ngspice, sim_is_vacask, token, result, &result_pos, &size);
+        my_strdup2(_ALLOC_ID_, &value1, 
+           handle_spice_get_current2(instname, engineering, sim_is_ngspice, sim_is_vacask,
+                                     value1));
       }
-      else if(inst >= 0 && strcmp(token,"@spice_get_diff_voltage")==0  && xctx->inst[inst].ptr >= 0)
+      else if(inst >= 0 && strcmp(value1,"@spice_get_diff_voltage")==0  && xctx->inst[inst].ptr >= 0)
       {
-        handle_spice_get_diff_voltage(inst, engineering, result, &result_pos, &size);
+        my_strdup2(_ALLOC_ID_, &value1, 
+           handle_spice_get_diff_voltage(inst, engineering));
       }
       else if(
-               strncmp(token,"@spice_get_current", 18)==0 ||
-               strncmp(token,"@spice_get_modelparam", 21)==0 ||
-               strncmp(token,"@spice_get_modelvoltage", 23)==0
+               strncmp(value1,"@spice_get_current", 18)==0 ||
+               strncmp(value1,"@spice_get_modelparam", 21)==0 ||
+               strncmp(value1,"@spice_get_modelvoltage", 23)==0
              )
       {
-        handle_spice_get_current(instname, engineering, sim_is_ngspice, sim_is_vacask, token, result, &result_pos, &size);
-      }
-      else if(strcmp(token,"@schvhdlprop")==0 && xctx->schvhdlprop)
-      {
-        tmp=strlen(xctx->schvhdlprop);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos,xctx->schvhdlprop, tmp+1);
-        result_pos+=tmp;
-      }
+        my_strdup2(_ALLOC_ID_, &value1, 
+           handle_spice_get_current(instname, engineering, sim_is_ngspice, sim_is_vacask,
+                                   value1));
 
-      else if(strcmp(token,"@schspectreprop")==0 && xctx->schspectreprop)
-      {
-        tmp=strlen(xctx->schspectreprop);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos,xctx->schspectreprop, tmp+1);
-        result_pos+=tmp;
       }
+      /* =========== END SPICE BACKANNOTATION HANDLING ============= */
+      
 
-      else if(strcmp(token,"@schprop")==0 && xctx->schprop)
-      {
-        tmp=strlen(xctx->schprop);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos,xctx->schprop, tmp+1);
-        result_pos+=tmp;
+      else if(!sp_prefix && !strcmp(value1, "@spiceprefix")) {
+        /* add nothing, prevent going into the general else {...} case */
       }
-      /* /20100217 */
+ 
 
-      else if(strcmp(token,"@schsymbolprop")==0 && xctx->schsymbolprop)
-      {
-        tmp=strlen(xctx->schsymbolprop);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos,xctx->schsymbolprop, tmp+1);
-        result_pos+=tmp;
-      }
-
-      else if(strcmp(token,"@schtedaxprop")==0 && xctx->schtedaxprop)
-      {
-        tmp=strlen(xctx->schtedaxprop);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos,xctx->schtedaxprop, tmp+1);
-        result_pos+=tmp;
-      }
-      /* /20100217 */
-
-      else if(strcmp(token,"@schverilogprop")==0 && xctx->schverilogprop)
-      {
-        tmp=strlen(xctx->schverilogprop);
-        STR_ALLOC(result, tmp + result_pos, &size);
-        memcpy(*result+result_pos,xctx->schverilogprop, tmp+1);
-        result_pos+=tmp;
-      /* if spiceprefix==0 and token == @spiceprefix then set empty value */
-      } else if(!sp_prefix && !strcmp(token, "@spiceprefix")) {
-        /* add nothing */
-      } else { /* Handle all other non special @tokens */
+      else if(value1[0] == '@' || value1[0] == '%') { /* Handle all other non special @tokens */
         if(inst >= 0) {
-          value = get_tok_value(xctx->inst[inst].prop_ptr, token+1, 0);
+          value = get_tok_value(xctx->inst[inst].prop_ptr, value1+1, 0);
           if(!xctx->tok_size && xctx->inst[inst].ptr >= 0) {
-            value=get_tok_value(xctx->sym[xctx->inst[inst].ptr].templ, token+1, 0);
+            value=get_tok_value(xctx->sym[xctx->inst[inst].ptr].templ, value1+1, 0);
           }
         } else {
           xctx->tok_size = 1;
-          value = token + 1;
+          value = value1;
         }
-        if(!xctx->tok_size) { /* above lines did not find a value for token */
-          if(token[0] =='%') {
-            /* no definition found -> subst with token without leading % */
-            tmp=token_pos -1 ; /* we need token_pos -1 chars, ( strlen(token+1) ) , excluding leading '%' */
-            STR_ALLOC(result, tmp + result_pos, &size);
-            /* dbg(2, "translate(): token=%s, token_pos = %d\n", token, token_pos); */
-            memcpy(*result+result_pos, token + 1, tmp+1);
-            result_pos+=tmp;
-          }
-        } else {
-          int i = level;
-          char *schname_attr = NULL; 
-          char *res = NULL;
-          my_mstrcat(_ALLOC_ID_, &schname_attr, "schname=\"", get_cell(xctx->current_name, 0), "\"", NULL);
-          my_strdup2(_ALLOC_ID_, &value1, value);
-          /* recursive substitution of value using parent level prop_ptr attributes */
-          while(i > 0) {
-            char *v = value1;
-            const char *tok;
-            if(v && v[0] == '@') v++;
-            tok = get_tok_value(lcc[i-1].prop_ptr, v, 0);
-            if(xctx->tok_size && tok[0]) {
-              dbg(1, "tok=%s\n", tok);
-              my_strdup2(_ALLOC_ID_, &value1, tok);
-            } else {
-              tok = get_tok_value(lcc[i-1].templ,  v, 0);
-              if(xctx->tok_size && tok[0]) {
-                dbg(1, "from parent template: tok=%s\n", tok);
-                my_strdup2(_ALLOC_ID_, &value1, tok);
-              }
-            }
-            dbg(1, "2 translate(): lcc[%d].prop_ptr=%s, value1=%s\n", i-1, lcc[i-1].prop_ptr, value1);
-            i--;
-          }
-          if(strchr(value1, '@')) {
-            my_strdup(_ALLOC_ID_, &value1, translate3(value1, 1, schname_attr, NULL, NULL, NULL, &res));
-          }
-          /* substitute remaing @params */
-          i = level;
-          while(i > 0) {
-            if(strchr(value1, '@')) {
-              my_strdup(_ALLOC_ID_, &value1, translate3(value1, 1, lcc[i-1].prop_ptr, NULL, NULL, NULL, &res));
-              dbg(1, "2 translate(): lcc[%d].prop_ptr=%s, value1=%s\n", i-1, lcc[i-1].prop_ptr, value1);
-            } else break;
-            i--;
-          }
-          my_free(_ALLOC_ID_, &schname_attr);
-          /* substitute remaing @params */
-          i = level;
-          while(i > 0) {
-            if(strchr(value1, '@')) {
-              my_strdup(_ALLOC_ID_, &value1, translate3(value1, 1, lcc[i-1].templ, NULL,  NULL, NULL, &res));
-              dbg(1, "2 translate(): lcc[%d].prop_ptr=%s, value1=%s\n", i-1, lcc[i-1].prop_ptr, value1);
-            } else break;
-            i--;
-          }
-
-          tmp=strlen(value1);
-          STR_ALLOC(result, tmp + result_pos, &size);
-          memcpy(*result+result_pos, value1, tmp+1);
-          result_pos+=tmp;
+        if(!xctx->tok_size && value1[0] =='%') { /* above lines did not find a value for token */
+          /* no definition found -> subst with token without leading % */
+          char *tmp = NULL;
+          my_strdup2(_ALLOC_ID_, &tmp, value1 + 1);
           my_free(_ALLOC_ID_, &value1);
-          if(res) my_free(_ALLOC_ID_, &res);
+          value1 = tmp;
+        } else {
+          char *tmp = NULL;
+          my_strdup2(_ALLOC_ID_, &tmp, value);
+          my_free(_ALLOC_ID_, &value1);
+          value1 = tmp;
         }
       }
+      dbg(1, ("translate(): 3 value1=%s\n", value1));
+      if(strpbrk(value1, "@%")) {
+        char *globalprop;
+
+        /* find definition in global properties if no prior definition found */
+        if(xctx->netlist_type      == CAD_VERILOG_NETLIST) globalprop = xctx->schverilogprop;
+        else if(xctx->netlist_type == CAD_VHDL_NETLIST)    globalprop = xctx->schvhdlprop;
+        else if(xctx->netlist_type == CAD_TEDAX_NETLIST)   globalprop = xctx->schtedaxprop;
+        else if(xctx->netlist_type == CAD_SPECTRE_NETLIST) globalprop = xctx->schspectreprop;
+        else if(xctx->netlist_type == CAD_SPICE_NETLIST)   globalprop = xctx->schprop;
+        else if(xctx->netlist_type == CAD_SYMBOL_ATTRS)    globalprop = xctx->schsymbolprop;
+        else globalprop = NULL;
+
+        if(inst >=0)  {
+          translate3(value1, inst, 1, xctx->inst[inst].prop_ptr,
+            xctx->sym[xctx->inst[inst].ptr].templ, globalprop, NULL, &value1);
+        } else {
+          translate3(value1, inst, 1, globalprop, NULL, NULL, NULL, &value1);
+        }
+        dbg(1, ("translate(): 4 value1=%s\n", value1));
+      }
+      value2 = recursive_subst(value1, inst >= 0 ? xctx->inst[inst].ptr : -1);
+      dbg(1, ("translate(): value2=%s\n", value2));
+      tmp=strlen(value2);
+      STR_ALLOC(_ALLOC_ID_, result, tmp + result_pos, &size);
+      memcpy(*result+result_pos, value2, tmp+1);
+      result_pos+=tmp;
+      my_free(_ALLOC_ID_, &value1);
+      my_free(_ALLOC_ID_, &value2);
+      
       token_pos = 0;
-      if(c == '@' || c == '%') s--; /* push back for next token processing */
-      else { /* append separator char */
-        STR_ALLOC(result, 1 + result_pos, &size);
+      if(c == '@' || c == '%') {
+        s--; /* push back for next token processing */
+        if(escape) {
+          s--; /* if escaped leave escape to be processed too */
+          escape = 0;
+        }
+      } else { /* append separator char */
+        STR_ALLOC(_ALLOC_ID_, result, 1 + result_pos, &size);
         (*result)[result_pos++]=(char)c;
       }
       state=TOK_BEGIN;
     } /* else if(state==TOK_SEP) */
     else if(state==TOK_BEGIN) {
-      STR_ALLOC(result, 1 + result_pos, &size);
+      STR_ALLOC(_ALLOC_ID_, result, 1 + result_pos, &size);
       (*result)[result_pos++]=(char)c;
     }
     if(c=='\0')
     {
-      STR_ALLOC(result, 1 + result_pos, &size);
+      STR_ALLOC(_ALLOC_ID_, result, 1 + result_pos, &size);
       (*result)[result_pos]='\0';
       break;
     }
   } /* while(1) */
-  dbg(2, "translate(): returning %s\n", *result);
   my_free(_ALLOC_ID_, &token);
   /* resolve spice_get_node patterns.
    * if result is like: 'tcleval(some_string)' pass it thru tcl evaluation so expressions
    * can be calculated */
 
-  my_strdup2(_ALLOC_ID_, result, tcl_hook2(*result));
-  my_strdup2(_ALLOC_ID_, result, spice_get_node(*result));
-
-  if(is_expr(*result) && inst >= 0) {
-    char *res = NULL;
-    dbg(1, "translate(): expr():%s\n", *result);
-    my_strdup2(_ALLOC_ID_, result, eval_expr(
-       translate3(*result, 1, xctx->inst[inst].prop_ptr, xctx->sym[xctx->inst[inst].ptr].templ,
-                              NULL, NULL, &res)));
-    my_free(_ALLOC_ID_, &res);
+  dbg(1, ("translate(): result: %s\n", *result));
+  if(*result && (*result)[0]) {
+    my_strdup2(_ALLOC_ID_, result, tcl_hook2(*result));
+    my_strdup2(_ALLOC_ID_, result, spice_get_node(*result));
+    my_strdup2(_ALLOC_ID_, result, eval_expr(*result));
   }
+  dbg(1, ("translate(): returning %s\n", *result));
   return *result;
 }
 
@@ -5384,7 +5574,7 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
   size = CADCHUNKALLOC;
   my_realloc(_ALLOC_ID_, result, size);
   (*result)[0] = '\0';
-  dbg(1, "translate2(): s=%s, level=%d\n", s, level);
+  dbg(1, ("translate2(): s=%s, level=%d\n", s, level));
   while (1) {
     c = *s++;
     if (c == '\\') {
@@ -5398,14 +5588,14 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
     if( state==TOK_BEGIN && (c=='@' || c=='%' ) ) state=TOK_TOKEN;
     else if(state==TOK_TOKEN && token_pos > 1 &&
        ( ( (space || c == '%' || c == '@') ) || escape) ) state = TOK_SEP;
-    STR_ALLOC(result, result_pos, &size);
-    STR_ALLOC(&token, token_pos, &sizetok);
+    STR_ALLOC(_ALLOC_ID_, result, result_pos, &size);
+    STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
     if (state == TOK_TOKEN) token[token_pos++] = (char)c;
     else if (state == TOK_SEP) {
       token[token_pos] = '\0';
       token_pos = 0;
 
-      dbg(1, "translate2(): lcc[%d].prop_ptr=%s token=%s\n", level, lcc[level].prop_ptr, token);
+      dbg(1, ("translate2(): lcc[%d].prop_ptr=%s token=%s\n", level, lcc[level].prop_ptr, token));
       /* if spiceprefix==0 and token == @spiceprefix then set empty value */
       if(!tclgetboolvar("spiceprefix") && !strcmp(token, "@spiceprefix")) {
         if(value) my_free(_ALLOC_ID_, &value);
@@ -5420,14 +5610,14 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
           my_strdup2(_ALLOC_ID_, &value, token + 1);
           xctx->tok_size = 1; /* just to tell %xxx token was found */
         }
-        dbg(1, "translate2(): lcc[%d].prop_ptr=%s value=%s\n", level, lcc[level].prop_ptr, value);
+        dbg(1, ("translate2(): lcc[%d].prop_ptr=%s value=%s\n", level, lcc[level].prop_ptr, value));
       }
       if(xctx->tok_size && value[0]) {
         i = level;
         /* recursive substitution of value using parent level prop_str attributes */
         while(i > 1) {
           const char *upperval = get_tok_value(lcc[i-1].prop_ptr, value, 0);
-          dbg(1, "translate2(): lcc[%d].prop_ptr=%s upperval=%s\n", i-1, lcc[i-1].prop_ptr, upperval);
+          dbg(1, ("translate2(): lcc[%d].prop_ptr=%s upperval=%s\n", i-1, lcc[i-1].prop_ptr, upperval));
           if(xctx->tok_size && upperval[0]) {
             my_strdup2(_ALLOC_ID_, &value, upperval);
           } else {
@@ -5436,7 +5626,7 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
           i--;
         }
         tmp = strlen(value);
-        STR_ALLOC(result, tmp + 1 + result_pos, &size); /* +1 to add leading '%' */
+        STR_ALLOC(_ALLOC_ID_, result, tmp + 1 + result_pos, &size); /* +1 to add leading '%' */
         /* prefix substituted token with a '%' so it will be recognized by translate()
          * for last level translation with instance placement prop_ptr attributes at
          * drawing/netlisting time. */
@@ -5447,7 +5637,7 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
       else if (strncmp(token, "@spice_get_voltage", 18) == 0 ||
                strncmp(token, "@spice_get_current", 18) == 0) { /* return unchanged */
         tmp = strlen(token);
-        STR_ALLOC(result, tmp + result_pos, &size);
+        STR_ALLOC(_ALLOC_ID_, result, tmp + result_pos, &size);
         memcpy(*result + result_pos, token, tmp + 1);
         result_pos += tmp;
       }
@@ -5458,29 +5648,29 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
           int i;
           for(i = 1; i <level; ++i) {
             const char *instname = get_tok_value(lcc[i].prop_ptr, "name", 0);
-            dbg(0, "adding %s to %s\n", instname, path);
             my_strcat(_ALLOC_ID_, &path, instname);
             my_strcat(_ALLOC_ID_, &path, ".");
           }
         }
-        dbg(1, "path=%s\n", path);
+        dbg(1, ("path=%s\n", path));
         tmp=strlen(path);
-        STR_ALLOC(result, tmp + result_pos, &size);
+        STR_ALLOC(_ALLOC_ID_, result, tmp + result_pos, &size);
         memcpy(*result+result_pos, path, tmp+1);
         my_free(_ALLOC_ID_, &path);
         result_pos+=tmp;
       }
       else if (strcmp(token, "@symname") == 0) {
-        tmp_sym_name = lcc[level].symname ? get_cell(lcc[level].symname, 0) : "";
+        tmp_sym_name = get_cell(get_tok_value(lcc[level].prop_ptr, "schematic", 0), 0);
+        if(!tmp_sym_name[0]) tmp_sym_name = lcc[level].symname ? get_cell(lcc[level].symname, 0) : "";
         tmp = strlen(tmp_sym_name);
-        STR_ALLOC(result, tmp + result_pos, &size);
+        STR_ALLOC(_ALLOC_ID_, result, tmp + result_pos, &size);
         memcpy(*result + result_pos, tmp_sym_name, tmp + 1);
         result_pos += tmp;
       }
       else if (strcmp(token, "@symname_ext") == 0) {
         tmp_sym_name = lcc[level].symname ? get_cell_w_ext(lcc[level].symname, 0) : "";
         tmp = strlen(tmp_sym_name);
-        STR_ALLOC(result, tmp + result_pos, &size);
+        STR_ALLOC(_ALLOC_ID_, result, tmp + result_pos, &size);
         memcpy(*result + result_pos, tmp_sym_name, tmp + 1);
         result_pos += tmp;
       }
@@ -5496,7 +5686,7 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
   } /* while(1) */
   my_free(_ALLOC_ID_, &token);
   my_free(_ALLOC_ID_, &value);
-  dbg(1, "translate2(): result=%s\n", *result);
+  dbg(1, ("translate2(): result=%s\n", *result));
   /* return tcl_hook2(result); */
   return *result;
 }
@@ -5513,14 +5703,17 @@ const char *translate2(Lcc *lcc, int level, char* s, char **result)
  *        == 1 --> remove escapes
  *   bit1 == 0 --> return unchanged token if no value found in s* strings
  *        == 1 --> return empty token if no definition found in s* strings
+ *   bit2 == 0 --> do substitute_predefined_token()
+ *        == 1 --> skip substitute_predefined_token();
  */
-const char *translate3(const char *s, int eat_escapes, const char *s1,
+const char *translate3(const char *s, int inst, int eat_escapes, const char *s1,
                        const char *s2, const char *s3, const char *s4, char **translated_tok)
 {
  static const char *empty="";
  char *result=NULL; /* safe to keep even with multiple schematics */
  register int c, state=TOK_BEGIN, space;
  char *token=NULL;
+ char *value1 = NULL;
  size_t sizetok=0;
  size_t token_pos=0;
  const char *value;
@@ -5533,7 +5726,7 @@ const char *translate3(const char *s, int eat_escapes, const char *s1,
    return empty;
  }
  xctx->tok_size = 0;
- dbg(1, "---\ntranslate3():\n   s=%s\n   s1=%s\n   s2=%s\n   s3=%s\n   s4=%s\n---\n", s, s1, s2, s3, s4);
+ dbg(1, ("---\ntranslate3():\n   s=%s\n   s1=%s\n   s2=%s\n   s3=%s\n   s4=%s\n---\n", s, s1, s2, s3, s4));
  my_strdup2(_ALLOC_ID_, &result, "");
  sptr[1] = s1; sptr[2] = s2; sptr[3] = s3; sptr[4] = s4;
  while(1) {
@@ -5553,18 +5746,21 @@ const char *translate3(const char *s, int eat_escapes, const char *s1,
     ) state=TOK_SEP;
   if( s > escape_pos ) escape = 0;
   s++;
-  STR_ALLOC(&token, token_pos, &sizetok);
+  STR_ALLOC(_ALLOC_ID_, &token, token_pos, &sizetok);
   if(state==TOK_TOKEN) token[token_pos++]=(char)c;
   else if(state==TOK_SEP) {
    found_value = 0;
    token[token_pos]='\0';
-   dbg(1, "translate3(): token=|%s|\n", token);
+   my_strdup2(_ALLOC_ID_, &value1, token);
+   dbg(1, ("translate3(): token=|%s|\n", token));
+   if(!(eat_escapes & 4)) substitute_predefined_token(&value1, inst, 1);
+   dbg(1, ("translate3(): value1=|%s|\n", value1));
    value = NULL;
 
    for(i = 1; i <= 4; i++) {
      if(!found_value && sptr[i]) {
-       value=get_tok_value(sptr[i], token+1, 0);
-       dbg(1, "translate3(): i=%d, value=%s\n", i, value);
+       value=get_tok_value(sptr[i], value1+1, 0);
+       dbg(1, ("translate3(): i=%d, value=%s\n", i, value));
        if(xctx->tok_size) found_value = xctx->tok_size;
      }
      else if( sptr[i]) {
@@ -5582,7 +5778,7 @@ const char *translate3(const char *s, int eat_escapes, const char *s1,
    if(!found_value) { /* above lines did not find a value for token */
      if((eat_escapes & 2) == 0) {
        /* no definition found -> keep token */
-       my_strcat(_ALLOC_ID_, &result, token);
+       my_strcat(_ALLOC_ID_, &result, value1);
      }
    } else {
      my_strcat(_ALLOC_ID_, &result, value);
@@ -5607,12 +5803,13 @@ const char *translate3(const char *s, int eat_escapes, const char *s1,
    break;
   }
  } /* while(1) */
- dbg(2, "translate3(): returning %s\n", result);
+ dbg(2, ("translate3(): returning %s\n", result));
  my_free(_ALLOC_ID_, &token);
+ if(value1) my_free(_ALLOC_ID_, &value1);
 
  /* if result is like: 'tcleval(some_string)' pass it thru tcl evaluation so expressions
   * can be calculated */
- dbg(1, "translate3(): result=|%s|\n", result);
+ dbg(1, ("translate3(): result=|%s|\n", result));
  my_strdup2(_ALLOC_ID_, translated_tok, tcl_hook2(result));
  xctx->tok_size = found_value;
  if(result) my_free(_ALLOC_ID_, &result);

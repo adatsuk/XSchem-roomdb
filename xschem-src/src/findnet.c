@@ -35,7 +35,7 @@ static void find_closest_wire(double mx, double my, int override_lock)
  double d = distance;
  threshold = CADWIREMINDIST * CADWIREMINDIST * xctx->zoom * xctx->zoom * tk_scaling * tk_scaling;
 
- dbg(1, "threshold=%g\n", threshold);
+ dbg(1, ("threshold=%g\n", threshold));
  for(i=0;i<xctx->wires; ++i)
  {
   if( (tmp = dist(xctx->wire[i].x1, xctx->wire[i].y1, xctx->wire[i].x2, xctx->wire[i].y2, mx, my)) < d )
@@ -115,7 +115,7 @@ static double find_closest_bezier(double mx, double my, double d, int c, int i, 
       }
     }
   }
-  dbg(1, "find_closest_bezier(): d=%.16g  n=%d\n", d, i);
+  dbg(1, ("find_closest_bezier(): d=%.16g  n=%d\n", d, i));
   return d;
 }
 
@@ -152,7 +152,7 @@ static void find_closest_polygon(double mx, double my, int override_lock)
          l = i; d = tmp;col = c;
         }
       }
-      dbg(1, "find_closest_polygon(): d=%.16g  n=%d\n", d, i);
+      dbg(1, ("find_closest_polygon(): d=%.16g  n=%d\n", d, i));
     }
   } /* end for i */
  } /* end for c */
@@ -183,7 +183,7 @@ static void find_closest_line(double mx, double my, int override_lock)
          < d )
    {
     l = i; d = tmp;col = c;
-    dbg(1, "find_closest_line(): d=%.16g  n=%d\n", d, i);
+    dbg(1, ("find_closest_line(): d=%.16g  n=%d\n", d, i));
    }
   } /* end for i */
  } /* end for c */
@@ -222,6 +222,7 @@ int find_closest_net_or_symbol_pin(double mx, double my, double *x, double *y)
     xInstance * const inst = xctx->inst;
     if( !(instanceptr = inst_iterator_next(&ctx))) break;
     i = instanceptr->n;
+    if(inst[i].ptr < 0) continue;
     if(!((inst[i].ptr+ xctx->sym)->type)) continue;
     rects = (inst[i].ptr+ xctx->sym)->rects[PINLAYER];
     for(j = 0; j < rects; j++) {
@@ -270,69 +271,6 @@ int find_closest_net_or_symbol_pin(double mx, double my, double *x, double *y)
   return found_net_or_pin;
 }
 
-#if 0
-void xfind_closest_net_or_symbol_pin(double mx, double my, double *x, double *y)
-{
-  int i, j, no_of_pin_rects;
-  double x0, x1, x2, y0, y1, y2, xx, yy, dist, min_dist_x = 0, min_dist_y = 0;
-  xRect rect;
-  short rot, flip;
-  char *type = NULL;
-  double curr_dist;
-
-  curr_dist = DBL_MAX;
-  for(i = 0;i < xctx->instances; ++i) {
-    x0=xctx->inst[i].x0;
-    y0=xctx->inst[i].y0;
-    rot = xctx->inst[i].rot;
-    flip = xctx->inst[i].flip;
-    my_strdup(_ALLOC_ID_, &type, (xctx->inst[i].ptr+ xctx->sym)->type);
-    if(!type) continue;
-
-    no_of_pin_rects = (xctx->inst[i].ptr+ xctx->sym)->rects[PINLAYER];
-    if(IS_LABEL_OR_PIN(type)) no_of_pin_rects=1;
-    for(j=0; j<no_of_pin_rects; ++j) {
-      rect = ((xctx->inst[i].ptr+ xctx->sym)->rect[PINLAYER])[j];
-      ROTATION(rot, flip, 0.0, 0.0, rect.x1, rect.y1, x1, y1);
-      ROTATION(rot, flip, 0.0, 0.0, rect.x2, rect.y2, x2, y2);
-      x1 += x0;
-      y1 += y0;
-      x2 += x0;
-      y2 += y0;
-      xx = (x1+x2)/2;
-      yy = (y1+y2)/2;
-      dist = (mx - xx) * (mx - xx) + (my - yy) * (my - yy);
-      if(dist < curr_dist) {
-        curr_dist = dist;
-        min_dist_x = xx;
-        min_dist_y = yy;
-      }
-    }
-  }
-  for(i = 0;i < xctx->wires; ++i) {
-    xx = xctx->wire[i].x1;
-    yy = xctx->wire[i].y1;
-    dist = (mx - xx) * (mx - xx) + (my - yy) * (my - yy);
-    if(dist < curr_dist) {
-      curr_dist = dist;
-      min_dist_x = xx;
-      min_dist_y = yy;
-    }
-    xx = xctx->wire[i].x2;
-    yy = xctx->wire[i].y2;
-    dist = (mx - xx) * (mx - xx) + (my - yy) * (my - yy);
-    if(dist < curr_dist) {
-      curr_dist = dist;
-      min_dist_x = xx;
-      min_dist_y = yy;
-    }
-  }
-  *x = min_dist_x;
-  *y = min_dist_y;
-  my_free(_ALLOC_ID_, &type);
-}
-#endif
-
 static void find_closest_arc(double mx, double my, int override_lock)
 {
  double dist, angle, angle1, angle2;
@@ -375,11 +313,11 @@ static void find_closest_arc(double mx, double my, int override_lock)
         }
       }
     }
-    dbg(1, "find_closest_arc(): dist = %g, angle = %g, angle1=%g, angle2=%g\n", dist, angle, angle1, angle2);
-    dbg(1, "find_closest_arc(): center=%g, %g: mouse: %g:%g\n",
-                             xctx->arc[c][i].x, xctx->arc[c][i].y, mx, my);
+    dbg(1, ("find_closest_arc(): dist = %g, angle = %g, angle1=%g, angle2=%g\n", dist, angle, angle1, angle2));
+    dbg(1, ("find_closest_arc(): center=%g, %g: mouse: %g:%g\n",
+                             xctx->arc[c][i].x, xctx->arc[c][i].y, mx, my));
     if(match ) {
-      dbg(1, "find_closest_arc(): i = %d\n", i);
+      dbg(1, ("find_closest_arc(): i = %d\n", i));
       r = i;
       d = dist;
       col = c;
@@ -398,7 +336,7 @@ static void find_closest_arc(double mx, double my, int override_lock)
 static void find_closest_box(double mx ,double my, int override_lock)
 {
  double tmp;
- double threshold = CADWIREMINDIST * xctx->zoom * tk_scaling;
+ double threshold = CADWIREMINDIST * xctx->zoom * tk_scaling * 2;
  int i, c, r=-1, col = 0;
  double d = distance;
 
@@ -408,8 +346,8 @@ static void find_closest_box(double mx ,double my, int override_lock)
   if(!xctx->enable_layer[c]) continue;
   for(i=0;i<xctx->rects[c]; ++i)
   {
-   if( POINTINSIDE(mx, my, xctx->rect[c][i].x1 - threshold, xctx->rect[c][i].y1 - threshold,
-                         xctx->rect[c][i].x2 + threshold, xctx->rect[c][i].y2 + threshold) &&
+   if( POINTINSIDE(mx, my, xctx->rect[c][i].x1, xctx->rect[c][i].y1,
+                         xctx->rect[c][i].x2, xctx->rect[c][i].y2) &&
       !POINTINSIDE(mx, my, xctx->rect[c][i].x1 + threshold, xctx->rect[c][i].y1 + threshold,
                          xctx->rect[c][i].x2 - threshold, xctx->rect[c][i].y2 - threshold))
    {
@@ -422,7 +360,7 @@ static void find_closest_box(double mx ,double my, int override_lock)
    }
   } /* end for i */
  } /* end for c */
- dbg(1, "find_closest_box(): d=%.16g\n", d);
+ dbg(1, ("find_closest_box(): d=%.16g\n", d));
  if( r!=-1 &&  (override_lock || strboolcmp(get_tok_value(xctx->rect[col][r].prop_ptr, "lock", 0), "true"))) {
   sel.n = r; sel.type = xRECT; sel.col = col;
   distance = d;
@@ -436,16 +374,23 @@ static void find_closest_element(double mx, double my, int override_lock)
   double d = distance;
   for(i = 0;i < xctx->instances; ++i)
   {
-    dbg(2, "find_closest_element(): %s: %g %g %g %g\n",
-           xctx->inst[i].instname, xctx->inst[i].x1, xctx->inst[i].y1, xctx->inst[i].x2, xctx->inst[i].y2);
+    dbg(1, ("find_closest_element(): %s: %g %g %g %g\n",
+           xctx->inst[i].instname, xctx->inst[i].x1, xctx->inst[i].y1, xctx->inst[i].x2, xctx->inst[i].y2));
     if( POINTINSIDE(mx, my, xctx->inst[i].x1, xctx->inst[i].y1, xctx->inst[i].x2, xctx->inst[i].y2) )
     {
-      tmp=dist_from_rect(mx, my, xctx->inst[i].xx1, xctx->inst[i].yy1, xctx->inst[i].xx2, xctx->inst[i].yy2);
+      /* bbox with texts */
+      tmp=dist_from_element(mx, my, xctx->inst[i].x1, xctx->inst[i].y1,
+                                    xctx->inst[i].x2, xctx->inst[i].y2);
+      /* bbox without texts */
+      /*
+       * tmp=dist_from_element(mx, my, xctx->inst[i].xx1, xctx->inst[i].yy1,
+       *                               xctx->inst[i].xx2, xctx->inst[i].yy2);
+       */
       if(tmp < d)
       {
         r = i; d = tmp;
       }
-      dbg(2, "find_closest_element(): finding closest element, instances=%d, dist=%.16g\n", i, tmp);
+      dbg(2, ("find_closest_element(): finding closest element, instances=%d, dist=%.16g\n", i, tmp));
     }
   } /* end for i */
   if( r != -1 &&  (override_lock || strboolcmp(get_tok_value(xctx->inst[r].prop_ptr, "lock", 0), "true")) ) {
@@ -490,7 +435,7 @@ static void find_closest_text(double mx, double my, int override_lock)
     if(dtmp < d) {
       d = dtmp;
       r = i;
-      dbg(2, "find_closest_text(): finding closest text, texts=%d, dist=%.16g\n", i, d);
+      dbg(2, ("find_closest_text(): finding closest text, texts=%d, dist=%.16g\n", i, d));
     }
    }
   } /* end for i */

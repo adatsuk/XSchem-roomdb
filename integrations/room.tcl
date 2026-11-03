@@ -370,7 +370,9 @@ proc room_load_room_data {data roompath cell} {
   # xschem load_data parses flags only *before* the data blob; anything after
   # is ignored. Wrong order used to drop -nosymbols/-schname → multi-minute
   # symbol resolution on WSL (abs_sym_path over /mnt/c).
-  set load_args [list -schname $logical -nofullzoom]
+  # -nodraw: WSLg sometimes reports a bogus 131072x1 screen; drawing before we
+  # force geometry in READY idle can stall for tens of seconds.
+  set load_args [list -schname $logical -nofullzoom -nodraw]
   if {[llength [room_primitive_lib_paths]] > 0} {
     lappend load_args -nosymbols
   }
@@ -1162,7 +1164,12 @@ proc room_open {roompath {cell ""}} {
   }
   room_log_timing "room_open after export; before xschem load"
   room_set_binding $sch $roompath
-  xschem load $sch
+  # Prefer -nosymbols: full symbol resolve during load hangs on WSL/9p when the
+  # native load_data bridge is missing. Symbols are attached via primitive reload.
+  if {[catch {xschem load -nosymbols -nofullzoom $sch} err]} {
+    room_log_launch "file bridge load -nosymbols failed ($err); retry plain load"
+    xschem load $sch
+  }
   room_log_timing "room_open after xschem load"
   room_apply_cell_names $roompath $cell
   room_schedule_title_refresh
@@ -1473,32 +1480,25 @@ proc room_view_all {} {
 }
 
 proc room_ensure_window_geometry {} {
-  if {[catch {set win [xschem get topwindow]}]} {
-    return
+  # Always force a usable size. LibMan/WSL often leaves untitled.sch at 1x1
+  # (process alive, window invisible) — checking <200 alone is not enough if
+  # get topwindow lags behind the real mapped window.
+  set wins {}
+  if {![catch {set tw [xschem get topwindow]}] && $tw ne ""} {
+    lappend wins $tw
   }
-  if {$win eq ""} {
-    return
-  }
-  if {[catch {set exists [winfo exists $win]}] || !$exists} {
-    return
-  }
-  set force 0
-  if {[catch {set geom [wm geometry $win]}]} {
-    set force 1
-  } elseif {[regexp {^(\d+)x(\d+)} $geom -> w h]} {
-    if {$w < 200 || $h < 200} {
-      set force 1
+  lappend wins .
+  foreach win $wins {
+    if {[catch {set exists [winfo exists $win]}] || !$exists} {
+      continue
     }
-  } else {
-    set force 1
+    catch {wm geometry $win 1300x950+100+50}
+    catch {wm minsize $win 800 600}
+    catch {wm deiconify $win}
+    catch {wm state $win normal}
+    catch {raise $win}
+    catch {focus -force $win}
   }
-  if {$force} {
-    wm geometry $win 1300x950+100+50
-  }
-  catch {wm deiconify $win}
-  catch {wm state $win normal}
-  catch {raise $win}
-  catch {focus $win}
 }
 
 proc room_primitive_cache_dir {} {
@@ -2201,6 +2201,7 @@ proc room_install_wsl_execute_hook {} {
 # Index-before-load avoids "Symbol not found" + multi-second reload/materialize.
 after idle {
   room_log_timing "startup idle: begin"
+  room_ensure_window_geometry
   room_install_title_hooks
   room_install_file_hooks
   room_install_simulate_hook
@@ -2211,6 +2212,7 @@ after idle {
   room_lock_install_hooks
   room_register_system_devices
   room_log_timing "startup idle: hooks done"
+  room_ensure_window_geometry
   room_build_symbol_index
   room_refresh_pathlist
   set ::room_primitive_setup_done 1
@@ -2218,10 +2220,12 @@ after idle {
   room_open_deferred
   room_fix_sp_raw_launchers
   room_log_timing "startup idle: after open_deferred"
+  room_ensure_window_geometry
   after 50 room_ensure_window_geometry
   after 150 room_ensure_window_geometry
   after 600 room_ensure_window_geometry
   after 1500 room_ensure_window_geometry
+  after 3000 room_ensure_window_geometry
   after 800 room_install_file_hooks
   after 2000 room_install_file_hooks
 }

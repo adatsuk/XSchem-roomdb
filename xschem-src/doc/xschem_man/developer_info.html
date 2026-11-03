@@ -614,7 +614,6 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    <li><kbd>       check_loaded n &lt;filename&gt;</kbd></li><pre>
    check if schematic / symbol file is already opened and return window path
    the loaded schematic is in.
-   for &lt;filename&gt; use absolute path or use [abs_sym_path filename]
      window_path[0] == ".drw"
      window_path[1] == ".x1.drw"
      ...
@@ -687,6 +686,8 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    (0=no debug). Higher levels yield more debug info.</pre>
    <li><kbd>       delete</kbd></li><pre>
    Delete selection </pre>
+   <li><kbd>       delete_undo</kbd></li><pre>
+   debug command: call xctx-&gt;delete_undo() </pre>
    <li><kbd>       delete_files</kbd></li><pre>
    Bring up a file selector the user can use to delete files </pre>
    <li><kbd>       descend [n] [notitle]</kbd></li><pre>
@@ -772,6 +773,26 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    Flip selection vertically, each object around its center </pre>
    <li><kbd>       floaters_from_selected_inst</kbd></li><pre>
    flatten to current level selected instance texts </pre>
+   <li><kbd>       fork_sch what sch_name [flags]</kbd></li><pre>
+   what:
+   1 or "store"    : insert current schematic
+   2 or "copy"     : insert copy of current schematic
+   3 or "restore"  : lookup schematic indicated in `sch_name` and switch to it
+   4 or "clear_all": free data
+   5 or "info"     : get info
+   6 or "clear"    : free indicated `sch_name`
+   7 or "check"    : lookup sch_name, return 1 if found, 0 if not
+       flags: 
+   1: set window title [default]
+   2: copy only metadata (yields an empty schematic)
+   4: draw schematic when switching [default]
+   8: do not uniquify name when copying (what == 2)
+  16: copy undo pointers and undo directory
+  32: for fork_sch(6, ...): only delete hash table entry, do not delete schematic data
+  64: for fork_sch(3, ...): delete pre-existing schematic also if modified.
+       dbglev: 
+   0: print informations, ask user to save a modified schematic [default]
+  &gt;0: print info only if debug_var &gt;-dbglev, do not prompt user</pre>
    <li><kbd>       fullscreen</kbd></li><pre>
    Toggle fullscreen modes: fullscreen with menu &amp; status, fullscreen, normal </pre>
    <li><kbd>       get var</kbd></li><pre>
@@ -838,6 +859,7 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
      <li><kbd> textlayer </kbd> layer number for texts </li>
      <li><kbd> top_path </kbd> get top hier path of current window (always "" for tabbed if) </li>
      <li><kbd> topwindow </kbd> same as top_path but main window returned as "." </li>
+     <li><kbd> undo_dirname </kbd> return undo directory path </li>
      <li><kbd> ui_state </kbd> return UI state </li>
      <li><kbd> version </kbd> return xschem version </li>
      <li><kbd> wirelayer </kbd> layer used for wires </li>
@@ -913,6 +935,12 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    <li><kbd>       get_sch_from_sym inst [symbol]</kbd></li><pre>
    get schematic associated with instance 'inst'
    if inst==-1 and a 'symbol' name is given get sch associated with symbol </pre>
+   <li><kbd>       get_sym_name inst [ndir] [ext] [abs_path]</kbd></li><pre>
+       get symbol referenced by instance `inst`, either by the instance `schematic` attribute
+       or by looking in instance symbol reference (xctx-&gt;inst[i].name)
+       ndir: specify how many directory components return in the result
+       ext: append extension if not zero
+       abs_path: get full path as found in library search paths </pre>
    <li><kbd>       get_sym_type symname</kbd></li><pre>
    get "type" value from global attributes of symbol,
    looking frst in loaded symbols, then looking in symbol file
@@ -939,6 +967,8 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    Do a simple hashing of string 'str' </pre>
    <li><kbd>       help</kbd></li><pre>
   Print command help </pre>
+   <li><kbd>       hier_attr</kbd></li><pre>
+   Debug command </pre>
    <li><kbd>       hier_psprint [file]</kbd></li><pre>
    Hierarchical postscript / pdf print
    if 'file' is not given show a fileselector dialog box </pre>
@@ -1055,7 +1085,7 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    0: eat non escaped quotes (")
    1: return unescaped quotes as part of the token value if they are present
    2: eat backslashes </pre>
-   <li><kbd>       load [-nosymbols|-gui|-noundoreset|-nofullzoom|-keep_symbols] f</kbd></li><pre>
+   <li><kbd>       load [-nosymbols|-gui|-noundoreset|-nofullzoom|-nodraw|-keep_symbols] f1 f2 ... </kbd></li><pre>
    Load a new file 'f'.
    '-gui': ask to save modified file or warn if opening an already
        open file or opening a new(not existing) file.
@@ -1147,6 +1177,7 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    If -erc is given it means netlister is called from gui, enable show infowindow
    If -nohier is given netlist only current level
    If -keep_symbols is given no not purge symbols encountered traversing the
+   if -noalert is given do not alert user if one schematic down the hierarchy is missing
    design hierarchy </pre>
    <li><kbd>       new_process [f]</kbd></li><pre>
    Start a new xschem process for a schematic.
@@ -1166,6 +1197,7 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
               If 'draw' is given and set to 0 do not redraw after switching tab
               (only tab i/f)
               if win_path set to "previous" switch to previous schematic.
+     info:   return information about active tabs/windows
    Main window/tab has win_path set to .drw,
    Additional windows/tabs have win_path set to .x1.drw, .x2.drw and so on...</pre>
    <li><kbd>       only_probes</kbd></li><pre>
@@ -1204,6 +1236,8 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    Start a GUI placement of a polygon
    if `gui` argument is given start a polygon GUI placement with 1st point
    set to current mouse coordinates </pre>
+   <li><kbd>       preserve_undo 1|0</kbd></li><pre>
+   enable or disable undo caching across hierarchies </pre>
    <li><kbd>       preview_window create|draw|destroy|close [win_path] [file]</kbd></li><pre>
    destroy: will delete preview schematic data and destroy container window
    close: same as destroy but leave the container window.
@@ -1238,8 +1272,10 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    Print spice raw netlist line for instance (number or name) 'inst' </pre>
    <li><kbd>       propagate_hilights [set clear]</kbd></li><pre>
    Debug: wrapper to propagate_hilights() function </pre>
-   <li><kbd>       push_undo</kbd></li><pre>
-   Push current state on undo stack </pre>
+   <li><kbd>       push_undo [what]</kbd></li><pre>
+   Push current state on undo stack
+   if `what == 1` is given do a push on slot pointed by cur_undo_ptr
+   without changing cur_undo_ptr </pre>
    <li><kbd>       raw what ...</kbd></li><pre>
      what = add | clear | datasets | index | info | loaded | list |
             new | points | rawfile | del | read | set | rename |
@@ -1434,6 +1470,19 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    Save schematic if modified. Does not ask confirmation!
    if 'fast' is given it is passed to save_schematic() to avoid
    updating window/tab/sim button states </pre>
+   <li><kbd>       save_undo_table what [sch_name] [undo_dirname]</kbd></li><pre>
+   debug hook to test the save_undo_table() undo hash table wrapper function.
+   what:
+      list: 
+      lookup:
+      delete:
+      delete_all:
+      insert:
+      insert_noreplace:
+   sch_name:
+      use the provided schematic name, if not provided use current xctx-&gt;current_name.
+   undo_dirname:
+      use the provided undo directory name, if not provided use xctx-&gt;undo_dirname</pre>
    <li><kbd>       saveas [file] [type]</kbd></li><pre>
    save current schematic as 'file'
    if file is empty ({}) use current schematic name
@@ -1454,6 +1503,7 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    schematic (issues a warning).
    if 'new_process' is given start a new xschem process
    if 'nodraw' is given do not draw loaded schematic
+   if 'force' is given no warning is given even if opening an already open schematic
    returns '1' if a new schematic was opened, 0 otherwise </pre>
    <li><kbd>       search regex|exact select tok val [no_match_case] [nodraw]</kbd></li><pre>
    Search instances / wires / rects / texts with attribute string containing 'tok'
@@ -1518,6 +1568,7 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
      <li><kbd> color_ps </kbd> set color psoscript (1 or 0) </li>
      <li><kbd> crosshair_layer </kbd> set layer for mouse crosshair </li>
      <li><kbd> constr_mv </kbd> set constrained move (1=horiz, 2=vert, 0=none) </li>
+     <li><kbd> current_name </kbd> set current_name field of current schematic </li>
      <li><kbd> cursor1_x </kbd> set graph cursor1 position </li>
      <li><kbd> cursor2_x </kbd> set graph cursor2 position </li>
      <li><kbd> draw_window </kbd> set drawing to window (1 or 0) </li>
@@ -1626,15 +1677,17 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    if 'new_process' is given start a new xschem process </pre>
    <li><kbd>       swap_cursors</kbd></li><pre>
    swap cursor A (1)  and cursor B (2) positions.</pre>
+   <li><kbd>       swap_tabs</kbd></li><pre>
+   swap first and second tab in tabs interface (internal command)</pre>
    <li><kbd>       swap_windows</kbd></li><pre>
    swap first and second window in window interface (internal command)</pre>
    <li><kbd>       switch [window_path |schematic_name]</kbd></li><pre>
    Switch context to indicated window path or schematic name
    returns 0 if switch was successfull or 1 in case of errors
-   if "previous" given as window path switch to previously active tab
-   (only for tabbed interface)
    (no tabs/windows present or no matching win_path / schematic name
-   found).</pre>
+   found).
+   if "previous" given as window path switch to previously active tab
+   (only for tabbed interface)</pre>
    <li><kbd>       symbols [n | 'derived_symbols']</kbd></li><pre>
    if 'n' given list symbol with name or number 'n', else list all
    if 'derived_symbols' is given list also symbols derived from base symbol
@@ -1689,10 +1742,11 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
      the voltage is 1.8
    If -1 is given as the instance number try to translate the string without using any
    instance specific data </pre>
-   <li><kbd>       translate3 str eat_escapes s1 [s2] [s3]</kbd></li><pre>
+   <li><kbd>       translate3 [-eat_escapes &lt;1|0&gt;] [-inst &lt;inst_n&gt;] str s1 [s2] [s3] [s4]</kbd></li><pre>
    Translate string 'str' replacing @xxx tokens with values in string s1 or if
      not found in string s2 or if not found in string s3
-     eat_escapes should be either 1 (remove backslashes) or 0 (keep them)
+     -eat_escapes should be either 1 (remove backslashes) or 0 (keep them)
+     if an instance number or name is set with -inst use inst attributes to resolve
      Example: xschem translate3 {the voltage is @value} {name=x12} {name=x1 value=1.8}
      the voltage is 1.8 </pre>
    <li><kbd>       trim_chars str sep</kbd></li><pre>
@@ -1702,7 +1756,7 @@ C {verilog_timescale.sym} 1050 -100 0 0 {name=s1 timestep="1ns" precision="1ns" 
    <li><kbd>       undo  [redo [set_modify]]</kbd></li><pre>
    Undo last action. Optional integers redo and set_modify are passed to pop_undo() </pre>
    <li><kbd>       undo_type disk|memory</kbd></li><pre>
-   Use disk file ('disk') or RAM ('memory') for undo bufer</pre>
+   Use disk file ('disk') or RAM ('memory') for undo buffer</pre>
    <li><kbd>       unhilight_all [fast]</kbd></li><pre>
    if 'fast' is given do not redraw
    Clear all highlights </pre>

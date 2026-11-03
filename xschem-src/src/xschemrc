@@ -92,12 +92,26 @@
 ###########################################################################
 #### SET CUSTOM COLORS FOR XSCHEM LIBRARIES MATCHING CERTAIN PATTERNS
 ###########################################################################
-#### each line contains a dircolor(pattern) followed by a color
-#### color can be an ordinary name (grey, brown, blue) or a hex code {#77aaff}
+#### each line contains a "dircolor(pattern)" followed by a color
+#### or a "dircolor(pattern)" followed by a two element list like "{#aa0000 green}"
+#### where the first element is the foreground color and the second one is the background color
+#### color/background can be an ordinary name (grey, brown, blue) or a hex code {#77aaff}
 #### hex code must be enclosed in braces
 #### these are the defaults:
-# set dircolor(/share/xschem/) red
-# set dircolor(/share/doc/xschem/) {#338844}
+# set dircolor(/devices$) {#007700}
+# set dircolor(/logic$) {#770000}
+# set dircolor(/examples$) {#770000}
+# set dircolor(/generators$) {#770000}
+# set dircolor(/ngspice$) {#770000}
+# set dircolor(/rom8k$) {#770000}
+# set dircolor(/analyses$) {#770000}
+# set dircolor(/xschem_simulator$) {#770000}
+# set dircolor(/ngspice_verilog_cosim$) {#770000}
+# set dircolor(/inst_sch_select$) {#770000}
+# set dircolor(/xTAG$) {#770000}
+# set dircolor(/pcb$) {#770000}
+# set dircolor(/library_LCC_stefan$) {#770000}
+# set dircolor(/binto7seg$) {#770000}
 
 ###########################################################################
 #### WINDOW TO OPEN ON STARTUP: XSCHEM_START_WINDOW
@@ -304,6 +318,11 @@
 #### Enabling this option swaps the two drag modes.
 # set enable_stretch 0
 
+#### inst_texts_in_area_select: if set to 1 include instance texts in bounding box
+#### to enclose when doing area selects
+#### Default: not enabled(0)
+# set inst_texts_in_area_select 1
+
 #### enable drawing crosshairs at mouse coordinates. Default: disabled (0)
 # set draw_crosshair 1
 
@@ -406,6 +425,14 @@
 #### It is highly recommended to keep undo on disk.
 #### Default: disk
 # set undo_type disk
+
+###########################################################################
+#### UNDO: PRESERVE UNDO BUFFERS ACROSS HIERARCHIES
+###########################################################################
+#### preserve undo buffers across hierarchies if set to 1
+#### currently works only if undo_type is set to disk.
+#### default: not set (0)
+# set_ne preserve_undo 1 
 
 ###########################################################################
 #### CUSTOM GRID / SNAP VALUE SETTINGS

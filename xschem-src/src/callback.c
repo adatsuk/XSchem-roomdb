@@ -64,7 +64,7 @@ static int waves_selected(int event, KeySym key, int state, int button)
     lmargin = (r->x2 - r->x1) / 20.;
     lmargin = lmargin < 3. ? 3. : lmargin;
     lmargin = lmargin > 20. ? 20. : lmargin;
-    if( !graph_use_ctrl_key && !(state & ControlMask) &&
+    if( !sel &&
        !strboolcmp(get_tok_value(xctx->rect[GRIDLAYER][i].prop_ptr, "lock", 0), "true")) continue;
     check =
       (xctx->ui_state & GRAPHPAN) ||
@@ -155,7 +155,7 @@ void abort_operation(void)
 {
   xctx->no_draw = 0;
   tcleval("set constr_mv 0" );
-  dbg(1, "abort_operation(): Escape: ui_state=%d, last_command=%d\n", xctx->ui_state, xctx->last_command);
+  dbg(1, ("abort_operation(): Escape: ui_state=%d, last_command=%d\n", xctx->ui_state, xctx->last_command));
   xctx->constr_mv=0;
 
   if(xctx->ui_state & STARTPOLYGON) new_polygon(END, xctx->mousex_snap, xctx->mousey_snap);
@@ -241,8 +241,8 @@ void start_line(double mx, double my)
 
 void start_wire(double mx, double my)
 {
-  dbg(1, "start_wire(): ui_state=%d, ui_state2=%d last_command=%d\n",
-      xctx->ui_state, xctx->ui_state2, xctx->last_command);
+  dbg(1, ("start_wire(): ui_state=%d, ui_state2=%d last_command=%d\n",
+      xctx->ui_state, xctx->ui_state2, xctx->last_command));
   xctx->last_command = STARTWIRE;
   if(xctx->ui_state & STARTWIRE) {
     if(tclgetboolvar("orthogonal_wiring") && !tclgetboolvar("constr_mv")){
@@ -303,7 +303,9 @@ void backannotate_at_cursor_b_pos(xRect *r, Graph_ctx *gr)
       save_npoints = raw->npoints[0];
       raw->npoints[0] = raw->allpoints;
     }
-    sweep_idx = get_raw_index(find_nth(get_tok_value(r->prop_ptr, "sweep", 0), ", ", "\"", 0, 1), NULL);
+    /* "label; expression" sweep attribute takes precedence, else plain sweep variable */
+    sweep_idx = graph_sweep_expr_col(get_tok_value(r->prop_ptr, "sweep", 0), NULL);
+    if(sweep_idx < 0) sweep_idx = get_raw_index(find_nth(get_tok_value(r->prop_ptr, "sweep", 0), ", ", "\"", 0, 1), NULL);
     if(sweep_idx < 0) sweep_idx = 0;
     if(r->flags & 4) { /* private_cursor */
       const char *s = get_tok_value(r->prop_ptr, "cursor2_x", 0);
@@ -317,14 +319,14 @@ void backannotate_at_cursor_b_pos(xRect *r, Graph_ctx *gr)
     }
     start = (gr->gx1 <= gr->gx2) ? gr->gx1 : gr->gx2;
     end = (gr->gx1 <= gr->gx2) ? gr->gx2 : gr->gx1;
-    dbg(1, "start=%g, end=%g\n", start, end);
+    dbg(1, ("start=%g, end=%g\n", start, end));
     if(gr->logx) {
       start = pow(10, start);
       end = pow(10, end);
     }
-    dbg(1, "cursor b pos: %g dataset=%d\n",  cursor2, gr->dataset);
+    dbg(1, ("cursor b pos: %g dataset=%d\n",  cursor2, gr->dataset));
     if(dataset < 0) dataset = 0; /* if all datasets are plotted use first for backannotation */
-    dbg(1, "dataset=%d\n", dataset);
+    dbg(1, ("dataset=%d\n", dataset));
     ofs = 0;
     for(dset = 0 ; dset < raw->datasets; dset++) {
       double prev_x, prev_prev_x;
@@ -348,16 +350,16 @@ void backannotate_at_cursor_b_pos(xRect *r, Graph_ctx *gr)
         }
         if(xx >= start && xx <= end) {
           if(dataset == sweepvar_wrap) {
-            dbg(1, "xx=%g cursor2=%g first=%d last=%d start=%g end=%g p=%d wrap=%d sweepvar_wrap=%d ofs=%d\n",
-              xx, cursor2, first, last, start, end, p, wrap, sweepvar_wrap, ofs);
+            dbg(1, ("xx=%g cursor2=%g first=%d last=%d start=%g end=%g p=%d wrap=%d sweepvar_wrap=%d ofs=%d\n",
+              xx, cursor2, first, last, start, end, p, wrap, sweepvar_wrap, ofs));
             if(first == -1) first = p;
             if(p == first) {
               if(xx == cursor2) {goto found;}
               s = XSIGN0(xx - cursor2);
-              dbg(1, "s=%d\n", s);
+              dbg(1, ("s=%d\n", s));
             } else {
               int ss =  XSIGN0(xx -  cursor2);
-              dbg(1, "s=%d, ss=%d\n", s, ss);
+              dbg(1, ("s=%d, ss=%d\n", s, ss));
               if(ss != s) {goto found;}
             }
             last = p;
@@ -385,7 +387,7 @@ void backannotate_at_cursor_b_pos(xRect *r, Graph_ctx *gr)
           p = first;
         }
       }
-      dbg(1, "xx=%g, p=%d\n", xx, p);
+      dbg(1, ("xx=%g, p=%d\n", xx, p));
       Tcl_UnsetVar(interp, "ngspice::ngspice_data", TCL_GLOBAL_ONLY);
       raw->annot_p = p;
       raw->annot_x = cursor2;
@@ -407,6 +409,26 @@ void backannotate_at_cursor_b_pos(xRect *r, Graph_ctx *gr)
   }
 }
 
+/* Smith chart: 1 when the mouse is within `rad` screen pixels (euclidean
+ * distance) of any of the per-wave markers of the cursor that sits at
+ * frequency f on graph i; flag_bit is the graph_flags bit of that cursor
+ * (2: cursor1, 4: cursor2).  A disabled cursor, a degenerate plane
+ * (ss <= 0) or no marker in range -> 0 */
+static int smith_mouse_on_marker(int i, double f, double rad, int flag_bit)
+{
+  int sx[64], sy[64], m, n;
+
+  if(!flag_bit) return 0;
+  if(xctx->graph_struct.ss <= 0.0) return 0;
+  n = smith_cursor_markers(i, f, 64, sx, sy);
+  for(m = 0; m < n; m++) {
+    double dx = X_TO_SCREEN(xctx->mousex) - sx[m];
+    double dy = Y_TO_SCREEN(xctx->mousey) - sy[m];
+    if(dx * dx + dy * dy < rad * rad) return 1;
+  }
+  return 0;
+}
+
 /* process user input (arrow keys for now) when only graphs are selected */
 
 /* xctx->graph_flags:
@@ -425,7 +447,6 @@ void backannotate_at_cursor_b_pos(xRect *r, Graph_ctx *gr)
 static int waves_callback(int event, int mx, int my, KeySym key, int button, int aux, int state)
 {
   Graph_ctx *gr;
-  int rstate; /* reduced state wit ShiftMask bit filtered out */
   int graph_use_ctrl_key = tclgetboolvar("graph_use_ctrl_key");
   int graph_select_to_zoom = tclgetboolvar("graph_select_to_zoom");
   int i, dataset = 0;
@@ -437,19 +458,20 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
   int track_dset = -2; /* used to find dataset of closest wave to mouse if 't' is pressed */
   xRect *r = NULL;
   int access_cond = graph_select_to_zoom || (!graph_use_ctrl_key || (state & ControlMask));
+  #if HAS_CAIRO==1
+  cairo_font_face_t *temp_font;
+  #endif
 
-  dbg(1, "uistate=%d, graph_flags=%d\n", xctx->ui_state, xctx->graph_flags);
+  dbg(1, ("uistate=%d, graph_flags=%d\n", xctx->ui_state, xctx->graph_flags));
   /* if(event != -3 && !xctx->raw) return 0; */
-  rstate = state; /* rstate does not have ShiftMask bit, so easier to test for KeyPress events */
-  rstate &= ~ShiftMask; /* don't use ShiftMask, identifying characters is sufficient */
   #if HAS_CAIRO==1
   cairo_save(xctx->cairo_ctx);
   cairo_save(xctx->cairo_save_ctx);
-  xctx->cairo_font =
+  temp_font =
         cairo_toy_font_face_create("Sans-Serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-  cairo_set_font_face(xctx->cairo_ctx, xctx->cairo_font);
-  cairo_set_font_face(xctx->cairo_save_ctx, xctx->cairo_font);
-  cairo_font_face_destroy(xctx->cairo_font);
+  cairo_set_font_face(xctx->cairo_ctx, temp_font);
+  cairo_set_font_face(xctx->cairo_save_ctx, temp_font);
+  cairo_font_face_destroy(temp_font);
   #endif
   gr = &xctx->graph_struct;
   if((i = xctx->graph_master) >= 0 && ((r = &xctx->rect[GRIDLAYER][i])->flags & 1)) {
@@ -463,15 +485,58 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
       if(POINTINSIDE(xctx->mousex, xctx->mousey, gr->x1, gr->y1, gr->x2 , gr->y2)) {
         int wcnt, save;
         save = gr->hilight_wave;
-        find_closest_wave(i, gr, &wcnt);
-        if(gr->hilight_wave >= 0) {
-          gr->hilight_wave = -1;
-          my_strdup2(_ALLOC_ID_, &r->prop_ptr,
-                     subst_token(r->prop_ptr, "hilight_wave", my_itoa(gr->hilight_wave)));
+        if(gr->mode == 3) {
+          /* Smith: button3 on a cursor marker -> Pos: prompt (below);
+           * on a trace -> hilight the wave of the plane-closest point */
+          double cursor1 = 0.0, cursor2 = 0.0;
+          if(xctx->graph_flags & 2) {
+            if(r->flags & 4) {
+              const char *s = get_tok_value(r->prop_ptr, "cursor1_x", 0);
+              if(s[0]) cursor1 = atof_eng(s);
+              else cursor1 = xctx->graph_cursor1_x;
+            } else {
+              cursor1 = xctx->graph_cursor1_x;
+            }
+          }
+          if(xctx->graph_flags & 4) {
+            if(r->flags & 4) {
+              const char *s = get_tok_value(r->prop_ptr, "cursor2_x", 0);
+              if(s[0]) cursor2 = atof_eng(s);
+              else cursor2 = xctx->graph_cursor2_x;
+            } else {
+              cursor2 = xctx->graph_cursor2_x;
+            }
+          }
+          if(!smith_mouse_on_marker(i, cursor1, 10.0, xctx->graph_flags & 2) &&
+             !smith_mouse_on_marker(i, cursor2, 10.0, xctx->graph_flags & 4)) {
+            double f = 0.0, u = 0.0, v = 0.0;
+            wcnt = -1;
+            if(gr->ss > 0.0) {
+              u = (X_TO_SCREEN(xctx->mousex) - gr->ssx0) / gr->ss;
+              v = (gr->ssy0 - Y_TO_SCREEN(xctx->mousey)) / gr->ss;
+               smith_closest_point(i, u, v, &f, &wcnt, NULL);
+            }
+            if(gr->hilight_wave >= 0) {
+              gr->hilight_wave = -1;
+              my_strdup2(_ALLOC_ID_, &r->prop_ptr,
+                         subst_token(r->prop_ptr, "hilight_wave", my_itoa(gr->hilight_wave)));
+            } else {
+              gr->hilight_wave = wcnt;
+              my_strdup2(_ALLOC_ID_, &r->prop_ptr,
+                         subst_token(r->prop_ptr, "hilight_wave", my_itoa(gr->hilight_wave)));
+            }
+          }
         } else {
-          gr->hilight_wave = wcnt;
-          my_strdup2(_ALLOC_ID_, &r->prop_ptr,
-                     subst_token(r->prop_ptr, "hilight_wave", my_itoa(gr->hilight_wave)));
+          find_closest_wave(i, gr, &wcnt);
+          if(gr->hilight_wave >= 0) {
+            gr->hilight_wave = -1;
+            my_strdup2(_ALLOC_ID_, &r->prop_ptr,
+                       subst_token(r->prop_ptr, "hilight_wave", my_itoa(gr->hilight_wave)));
+          } else {
+            gr->hilight_wave = wcnt;
+            my_strdup2(_ALLOC_ID_, &r->prop_ptr,
+                       subst_token(r->prop_ptr, "hilight_wave", my_itoa(gr->hilight_wave)));
+          }
         }
 
         if(save != gr->hilight_wave) {
@@ -490,34 +555,70 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
     if(xctx->graph_flags & 64) {
       char sx[100], sy[100];
       double xval, yval;
-      if(gr->digital) {
-        double deltag = gr->gy2 - gr->gy1;
-        double s1 = DIG_NWAVES; /* 1/DIG_NWAVES  waveforms fit in graph if unscaled vertically */
-        double s2 = DIG_SPACE; /* (DIG_NWAVES - DIG_SPACE) spacing between traces */
-        double c = s1 * deltag;
-        deltag = deltag * s1 / s2;
-        yval=(DG_Y(xctx->mousey) - c) / s2;
-        yval=fmod(yval, deltag ) +  gr->gy1;
-        if(yval > gr->gy2 + deltag * (s1 + s2) * 0.5) yval -= deltag;
+      if(gr->mode == 3) {
+        /* Smith: plane readout under the mouse instead of x/y values:
+         * Gamma = u+jv (+ |Gamma|, angle) and
+         * Z = z0 (1 + Gamma) / (1 - Gamma) (+ |Z|, angle); ASCII
+         * stand-ins per the cursor-marker readout convention (the
+         * vector font has no Gamma/angle/degree glyphs, Omega does) */
+        char gstr[128], zstr[128];
+        if(gr->ss > 0.0) {
+          double u, v, abs_g, ang_g, den;
+          double z_re, z_im, abs_z, ang_z;
+          u = (X_TO_SCREEN(xctx->mousex) - gr->ssx0) / gr->ss;
+          v = (gr->ssy0 - Y_TO_SCREEN(xctx->mousey)) / gr->ss;
+          abs_g = sqrt(u * u + v * v);
+          ang_g = atan2(v, u) * 180.0 / XSCH_PI;
+          if(v >= 0.0)
+            my_snprintf(gstr, S(gstr), "Gamma = %g+j%g, |Gamma|=%g, %g deg", u, v, abs_g, ang_g);
+          else
+            my_snprintf(gstr, S(gstr), "Gamma = %g-j%g, |Gamma|=%g, %g deg", u, -v, abs_g, ang_g);
+          den = (1.0 - u) * (1.0 - u) + v * v; /* |1 - Gamma|^2 */
+          if(den < 1e-300) {
+            my_snprintf(zstr, S(zstr), "Z = inf");
+          } else {
+            z_re = gr->smith_z0 * (1.0 - u * u - v * v) / den;
+            z_im = gr->smith_z0 * 2.0 * v / den;
+            abs_z = sqrt(z_re * z_re + z_im * z_im);
+            ang_z = atan2(z_im, z_re) * 180.0 / XSCH_PI;
+            if(z_im >= 0.0)
+              my_snprintf(zstr, S(zstr), "Z = %g+j%g Ω, |Z|=%g, %g deg", z_re, z_im, abs_z, ang_z);
+            else
+              my_snprintf(zstr, S(zstr), "Z = %g-j%g Ω, |Z|=%g, %g deg", z_re, -z_im, abs_z, ang_z);
+          }
+          tclvareval("set measure_text \"", gstr, "\n", zstr, "\"", NULL);
+          tcleval("graph_show_measure");
+        }
       } else {
-        yval = G_Y(xctx->mousey);
+        if(gr->digital) {
+          double deltag = gr->gy2 - gr->gy1;
+          double s1 = DIG_NWAVES; /* 1/DIG_NWAVES  waveforms fit in graph if unscaled vertically */
+          double s2 = DIG_SPACE; /* (DIG_NWAVES - DIG_SPACE) spacing between traces */
+          double c = s1 * deltag;
+          deltag = deltag * s1 / s2;
+          yval=(DG_Y(xctx->mousey) - c) / s2;
+          yval=fmod(yval, deltag ) +  gr->gy1;
+          if(yval > gr->gy2 + deltag * (s1 + s2) * 0.5) yval -= deltag;
+        } else {
+          yval = G_Y(xctx->mousey);
+        }
+
+        xval = G_X(xctx->mousex);
+        if(gr->logx) xval = pow(10, xval);
+        if(gr->logy) yval = pow(10, yval);
+        if(gr->unitx != 1.0)
+          sprintf(sx, "%.*g%c", xctx->ev_precision, gr->unitx * xval, gr->unitx_suffix);
+        else
+          my_strncpy(sx, dtoa_eng(xval, xctx->ev_precision), S(sx));
+
+        if(gr->unity != 1.0)
+          sprintf(sy, "%.*g%c", xctx->ev_precision, gr->unity * yval, gr->unity_suffix);
+        else
+          my_strncpy(sy, dtoa_eng(yval, xctx->ev_precision), S(sy));
+
+        tclvareval("set measure_text \"y=", sy, "\nx=", sx, "\"", NULL);
+        tcleval("graph_show_measure");
       }
-
-      xval = G_X(xctx->mousex);
-      if(gr->logx) xval = pow(10, xval);
-      if(gr->logy) yval = pow(10, yval);
-      if(gr->unitx != 1.0)
-        sprintf(sx, "%.*g%c", xctx->ev_precision, gr->unitx * xval, gr->unitx_suffix);
-      else
-        my_strncpy(sx, dtoa_eng(xval, xctx->ev_precision), S(sx));
-
-      if(gr->unitx != 1.0)
-        sprintf(sy, "%.*g%c", xctx->ev_precision, gr->unity * yval, gr->unity_suffix);
-      else
-        my_strncpy(sy, dtoa_eng(yval, xctx->ev_precision), S(sy));
-
-      tclvareval("set measure_text \"y=", sy, "\nx=", sx, "\"", NULL);
-      tcleval("graph_show_measure");
     } /* if(xctx->graph_flags & 64) */
 
     gr->master_gx1 = gr->gx1;
@@ -547,36 +648,74 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
     /* move cursor1 */
     /* set cursor position from master graph x-axis */
     else if(event == MotionNotify && (state & Button1Mask) && (xctx->graph_flags & 16 )) {
-      double c;
+      double c = 0.0;
+      int changed = 0;
 
-      c = G_X(xctx->mousex);
-      if(gr->logx) c = pow(10, c);
-      if(r->flags & 4) { /* private_cursor */
-        my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor1_x", dtoa(c)));
+      if(gr->mode == 3) {
+        /* Smith: snap to the plane-closest trace point under the mouse; no
+         * plotted point (or degenerate plane) -> leave the cursor unchanged */
+        double f = 0.0, u = 0.0, v = 0.0;
+        int wave = -1;
+        if(gr->ss > 0.0) {
+          u = (X_TO_SCREEN(xctx->mousex) - gr->ssx0) / gr->ss;
+          v = (gr->ssy0 - Y_TO_SCREEN(xctx->mousey)) / gr->ss;
+          if(smith_closest_point(i, u, v, &f, &wave, NULL) == 0) {
+            c = f;
+            changed = 1;
+          }
+        }
       } else {
-        xctx->graph_cursor1_x = c;
+        c = G_X(xctx->mousex);
+        if(gr->logx) c = pow(10, c);
+        changed = 1;
       }
-      need_all_redraw = 1;
+      if(changed) {
+        if(r->flags & 4) { /* private_cursor */
+          my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor1_x", dtoa(c)));
+        } else {
+          xctx->graph_cursor1_x = c;
+        }
+        need_all_redraw = 1;
+      }
     }
     /* move cursor2 */
     /* set cursor position from master graph x-axis */
     else if(event == MotionNotify && (state & Button1Mask) && (xctx->graph_flags & 32 )) {
-      double c;
+      double c = 0.0;
       int floaters = there_are_floaters();
+      int changed = 0;
 
-      c = G_X(xctx->mousex);
-      if(gr->logx) c = pow(10, c);
-      if(r->flags & 4) { /* private_cursor */
-        my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor2_x", dtoa(c)));
+      if(gr->mode == 3) {
+        /* Smith: snap to the plane-closest trace point under the mouse; no
+         * plotted point (or degenerate plane) -> leave the cursor unchanged */
+        double f = 0.0, u = 0.0, v = 0.0;
+        int wave = -1;
+        if(gr->ss > 0.0) {
+          u = (X_TO_SCREEN(xctx->mousex) - gr->ssx0) / gr->ss;
+          v = (gr->ssy0 - Y_TO_SCREEN(xctx->mousey)) / gr->ss;
+          if(smith_closest_point(i, u, v, &f, &wave, NULL) == 0) {
+            c = f;
+            changed = 1;
+          }
+        }
       } else {
-        xctx->graph_cursor2_x = c;
+        c = G_X(xctx->mousex);
+        if(gr->logx) c = pow(10, c);
+        changed = 1;
       }
-      if(tclgetboolvar("live_cursor2_backannotate")) {
-        backannotate_at_cursor_b_pos(r, gr);
-        if(floaters) set_modify(-2); /* update floater caches to reflect actual backannotation */
-        need_fullredraw = 1;
-      } else {
-        need_all_redraw = 1;
+      if(changed) {
+        if(r->flags & 4) { /* private_cursor */
+          my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor2_x", dtoa(c)));
+        } else {
+          xctx->graph_cursor2_x = c;
+        }
+        if(tclgetboolvar("live_cursor2_backannotate")) {
+          backannotate_at_cursor_b_pos(r, gr);
+          if(floaters) set_modify(-2); /* update floater caches to reflect actual backannotation */
+          need_fullredraw = 1;
+        } else {
+          need_all_redraw = 1;
+        }
       }
     }
 
@@ -631,11 +770,30 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
         } else {
           cursor1 = xctx->graph_cursor1_x;
         }
-        if(gr->logx ) {
-          cursor1 = mylog10(cursor1);
-        }
-        if(fabs(xctx->mousex - W_X(cursor1)) < 10) {
-          xctx->graph_flags |= 16; /* Start move cursor1 */
+        if(gr->mode == 3) {
+          /* Smith: start the move when the mouse is within 10 px of any marker
+           * of this cursor (any trace; euclidean screen-pixel distance); a
+           * degenerate plane (ss <= 0) -> no grab */
+          int m, n;
+          int sx[64], sy[64];
+          if(gr->ss > 0.0) {
+            n = smith_cursor_markers(i, cursor1, 64, sx, sy);
+            for(m = 0; m < n; m++) {
+              double dx = X_TO_SCREEN(xctx->mousex) - sx[m];
+              double dy = Y_TO_SCREEN(xctx->mousey) - sy[m];
+              if(dx * dx + dy * dy < 10.0 * 10.0) {
+                xctx->graph_flags |= 16; /* Start move cursor1 */
+                break;
+              }
+            }
+          }
+        } else {
+          if(gr->logx ) {
+            cursor1 = mylog10(cursor1);
+          }
+          if(fabs(xctx->mousex - W_X(cursor1)) < 10) {
+            xctx->graph_flags |= 16; /* Start move cursor1 */
+          }
         }
       }
       if(xctx->graph_flags & 4) { /* cursor2 */
@@ -650,11 +808,30 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
         } else {
           cursor2 = xctx->graph_cursor2_x;
         }
-        if(gr->logx) {
-          cursor2 = mylog10(cursor2);
-        }
-        if(fabs(xctx->mousex - W_X(cursor2)) < 10) {
-          xctx->graph_flags |= 32; /* Start move cursor2 */
+        if(gr->mode == 3) {
+          /* Smith: start the move when the mouse is within 10 px of any marker
+           * of this cursor (any trace; euclidean screen-pixel distance); a
+           * degenerate plane (ss <= 0) -> no grab */
+          int m, n;
+          int sx[64], sy[64];
+          if(gr->ss > 0.0) {
+            n = smith_cursor_markers(i, cursor2, 64, sx, sy);
+            for(m = 0; m < n; m++) {
+              double dx = X_TO_SCREEN(xctx->mousex) - sx[m];
+              double dy = Y_TO_SCREEN(xctx->mousey) - sy[m];
+              if(dx * dx + dy * dy < 10.0 * 10.0) {
+                xctx->graph_flags |= 32; /* Start move cursor2 */
+                break;
+              }
+            }
+          }
+        } else {
+          if(gr->logx) {
+            cursor2 = mylog10(cursor2);
+          }
+          if(fabs(xctx->mousex - W_X(cursor2)) < 10) {
+            xctx->graph_flags |= 32; /* Start move cursor2 */
+          }
         }
       }
     }
@@ -676,7 +853,11 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
         if(gr->logx ) {
           logcursor = mylog10(cursor);
         }
-        if(fabs(xctx->mousex - W_X(logcursor)) < 10) {
+        /* Smith: no vertical cursor line - the prompt opens when the mouse
+         * is within 10 px of one of this cursor's markers */
+        if(gr->mode == 3
+             ? smith_mouse_on_marker(i, cursor, 10.0, 2)
+             : fabs(xctx->mousex - W_X(logcursor)) < 10) {
           tclvareval("input_line {Pos:} {} ", dtoa_eng(cursor, xctx->ev_precision), NULL);
           cursor = atof_eng(tclresult());
           if(r->flags & 4) {
@@ -706,7 +887,11 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
         if(gr->logx) {
           logcursor = mylog10(cursor);
         }
-        if(fabs(xctx->mousex - W_X(logcursor)) < 10) {
+        /* Smith: no vertical cursor line - the prompt opens when the mouse
+         * is within 10 px of one of this cursor's markers */
+        if(gr->mode == 3
+             ? smith_mouse_on_marker(i, cursor, 10.0, 4)
+             : fabs(xctx->mousex - W_X(logcursor)) < 10) {
           tclvareval("input_line {Pos:} {} ", dtoa_eng(cursor, xctx->ev_precision), NULL);
           cursor = atof_eng(tclresult());
           if(r->flags & 4) {
@@ -765,15 +950,35 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
       xctx->graph_flags ^= 2;
       need_all_redraw = 1;
       if(xctx->graph_flags & 2) {
-        double c = G_X(xctx->mousex);
+        double c = 0.0;
+        int changed = 0;
 
-        if(gr->logx) c = pow(10, c);
-        if(r->flags & 4) {
-          if(!get_tok_value(r->prop_ptr, "cursor1_x", 0)[0]) {
-            my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor1_x", dtoa(c)));
+        if(gr->mode == 3) {
+          /* Smith: frequency = sweep value of the plane-closest trace point to
+           * the mouse; no plotted point (or degenerate plane) -> no change */
+          double f = 0.0, u = 0.0, v = 0.0;
+          int wave = -1;
+          if(gr->ss > 0.0) {
+            u = (X_TO_SCREEN(xctx->mousex) - gr->ssx0) / gr->ss;
+            v = (gr->ssy0 - Y_TO_SCREEN(xctx->mousey)) / gr->ss;
+            if(smith_closest_point(i, u, v, &f, &wave, NULL) == 0) {
+              c = f;
+              changed = 1;
+            }
           }
         } else {
-          xctx->graph_cursor1_x = c;
+          c = G_X(xctx->mousex);
+          if(gr->logx) c = pow(10, c);
+          changed = 1;
+        }
+        if(changed) {
+          if(r->flags & 4) {
+            if(!get_tok_value(r->prop_ptr, "cursor1_x", 0)[0]) {
+              my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor1_x", dtoa(c)));
+            }
+          } else {
+            xctx->graph_cursor1_x = c;
+          }
         }
       }
     }
@@ -783,15 +988,35 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
 
       xctx->graph_flags ^= 4;
       if(xctx->graph_flags & 4) {
-        double c = G_X(xctx->mousex);
+        double c = 0.0;
+        int changed = 0;
 
-        if(gr->logx) c = pow(10, c);
-        if(r->flags & 4) {
-          if(!get_tok_value(r->prop_ptr, "cursor2_x", 0)[0]) {
-            my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor2_x", dtoa(c)));
+        if(gr->mode == 3) {
+          /* Smith: frequency = sweep value of the plane-closest trace point to
+           * the mouse; no plotted point (or degenerate plane) -> no change */
+          double f = 0.0, u = 0.0, v = 0.0;
+          int wave = -1;
+          if(gr->ss > 0.0) {
+            u = (X_TO_SCREEN(xctx->mousex) - gr->ssx0) / gr->ss;
+            v = (gr->ssy0 - Y_TO_SCREEN(xctx->mousey)) / gr->ss;
+            if(smith_closest_point(i, u, v, &f, &wave, NULL) == 0) {
+              c = f;
+              changed = 1;
+            }
           }
         } else {
-          xctx->graph_cursor2_x = c;
+          c = G_X(xctx->mousex);
+          if(gr->logx) c = pow(10, c);
+          changed = 1;
+        }
+        if(changed) {
+          if(r->flags & 4) {
+            if(!get_tok_value(r->prop_ptr, "cursor2_x", 0)[0]) {
+              my_strdup(_ALLOC_ID_, &r->prop_ptr, subst_token(r->prop_ptr, "cursor2_x", dtoa(c)));
+            }
+          } else {
+            xctx->graph_cursor2_x = c;
+          }
         }
         if(tclgetboolvar("live_cursor2_backannotate")) {
           backannotate_at_cursor_b_pos(r, gr);
@@ -874,7 +1099,29 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
         }
         if(track_dset < 0) {
           int tmp;
-          track_dset = find_closest_wave(i, gr, &tmp);
+          int dset = -1;
+          double f = 0.0, u = 0.0, v = 0.0;
+          if(gr->mode == 3) {
+            /* Smith: the sweep-axis nearest-wave search is inapplicable on the
+             * plane. When a specific dataset is selected use it; when all
+             * datasets are plotted use the dataset of the plane-closest point
+             * under the mouse (the one the hilighted wave was picked from),
+             * falling back to dataset 0 when no plotted point is found */
+            if(gr->dataset >= 0) {
+              track_dset = gr->dataset;
+            } else {
+              if(gr->ss > 0.0) {
+                u = (X_TO_SCREEN(xctx->mousex) - gr->ssx0) / gr->ss;
+                v = (gr->ssy0 - Y_TO_SCREEN(xctx->mousey)) / gr->ss;
+                if(smith_closest_point(i, u, v, &f, &tmp, &dset) == 0 && dset >= 0) {
+                  track_dset = dset;
+                }
+              }
+              if(track_dset < 0) track_dset = 0;
+            }
+          } else {
+            track_dset = find_closest_wave(i, gr, &tmp);
+          }
         } else {
           track_dset = -1; /* all datasets */
         }
@@ -892,7 +1139,7 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
     if(!xctx->graph_left) xctx->mx_double_save = xctx->mousex_snap;
     if(xctx->graph_left) xctx->my_double_save = xctx->mousey_snap;
   }
-  dbg(1, "graph_master=%d\n", xctx->graph_master);
+  dbg(1, ("graph_master=%d\n", xctx->graph_master));
 
   finish:
 
@@ -912,7 +1159,9 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
     my_free(_ALLOC_ID_, &rawfile);
     my_free(_ALLOC_ID_, &sim_type);
 
-    idx = get_raw_index(find_nth(get_tok_value(r->prop_ptr, "sweep", 0), ", ", "\"", 0, 1), NULL);
+    /* "label; expression" sweep attribute takes precedence, else plain sweep variable */
+    idx = graph_sweep_expr_col(get_tok_value(r->prop_ptr, "sweep", 0), NULL);
+    if(idx < 0) idx = get_raw_index(find_nth(get_tok_value(r->prop_ptr, "sweep", 0), ", ", "\"", 0, 1), NULL);
     dset = dataset == -1 ? 0 : dataset;
 
     if(idx < 0 ) idx = 0;
@@ -947,10 +1196,12 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
   for(i=0; i< xctx->rects[GRIDLAYER]; ++i) {
     int same_sim_type = 0;
     char *curr_sim_type = NULL;
+    char *curr_mode = NULL;
     r = &xctx->rect[GRIDLAYER][i];
     need_redraw = 0;
     if( !(r->flags & 1) ) continue; /* 1: graph; 3: graph_unlocked */
     my_strdup2(_ALLOC_ID_, &curr_sim_type, get_tok_value(r->prop_ptr, "sim_type", 0));
+    my_strdup2(_ALLOC_ID_, &curr_mode, get_tok_value(r->prop_ptr, "mode", 0));
     gr->gx1 = gr->master_gx1;
     gr->gx2 = gr->master_gx2;
     gr->gw = gr->master_gw;
@@ -962,9 +1213,16 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
     if(!(xctx->rect[GRIDLAYER][xctx->graph_master].flags & 2) &&
        !strcmp(curr_sim_type,
           get_tok_value(xctx->rect[GRIDLAYER][xctx->graph_master].prop_ptr, "sim_type", 0))) {
-      same_sim_type = 1;
+      /* a Smith chart x-axis (Re(Gamma)) differs from a normal graph's sweep axis,
+       * so the x-range only syncs between graphs of the same mode class:
+       * "Smith" is class Smith, anything else (incl. empty) is class normal */
+      int curr_smith = !strcmp(curr_mode, "Smith");
+      int master_smith = !strcmp(
+        get_tok_value(xctx->rect[GRIDLAYER][xctx->graph_master].prop_ptr, "mode", 0), "Smith");
+      if(curr_smith == master_smith) same_sim_type = 1;
     }
     my_free(_ALLOC_ID_, &curr_sim_type);
+    my_free(_ALLOC_ID_, &curr_mode);
 
     if(event == MotionNotify && (state & Button1Mask) && !xctx->graph_bottom &&
       !(xctx->graph_flags & (16 | 32 | 512 | 1024))) {
@@ -1004,7 +1262,7 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
         delta_threshold = 0.01;
         /* selected or locked or master */
         if( r->sel || (same_sim_type && !(r->flags & 2)) || i == xctx->graph_master) {
-          dbg(1, "moving waves: %d\n", i);
+          dbg(1, ("moving waves: %d\n", i));
           if(fabs(xctx->mx_double_save - xctx->mousex_snap) > fabs(gr->cx * delta) * delta_threshold) {
             xx1 = gr->gx1 + (xctx->mx_double_save - xctx->mousex_snap) / gr->cx;
             xx2 = gr->gx2 + (xctx->mx_double_save - xctx->mousex_snap) / gr->cx;
@@ -1403,7 +1661,7 @@ static int waves_callback(int event, int mx, int my, KeySym key, int button, int
   /* update saved mouse position after processing all graphs */
   if(save_mouse_at_end) {
     if( fabs(xctx->mx_double_save - xctx->mousex_snap) > fabs(gr->master_cx * gr->master_gw) * delta_threshold) {
-      dbg(1, "save mouse pos\n");
+      dbg(1, ("save mouse pos\n"));
       xctx->mx_double_save = xctx->mousex_snap;
       xctx->my_double_save = xctx->mousey_snap;
     }
@@ -1630,7 +1888,7 @@ void draw_crosshair(int what, int state)
   int snap_cursor = tclgetintvar("snap_cursor");
   double mx, my;
   int changed = 0;
-  dbg(1, "draw_crosshair(): what=%d\n", what);
+  dbg(1, ("draw_crosshair(): what=%d\n", what));
   sdw = xctx->draw_window;
   sdp = xctx->draw_pixmap;
 
@@ -1648,7 +1906,7 @@ void draw_crosshair(int what, int state)
         /* mouse position changed, so find new closest net or pin */
         find_closest_net_or_symbol_pin(xctx->mousex_snap, xctx->mousey_snap, &mx, &my);
         changed = 1; /* we force a cursor redraw */
-        dbg(1, "find\n");
+        dbg(1, ("find\n"));
       }
     } else {
       /* draw_snap_cursor(what); */
@@ -1661,7 +1919,7 @@ void draw_crosshair(int what, int state)
   if(!changed && !(what & 4) && mx == xctx->prev_crossx && my == xctx->prev_crossy) {
     return;
   }
-  dbg(1, "draw %d\n", what);
+  dbg(1, ("draw %d\n", what));
   xctx->draw_pixmap = 0;
   xctx->draw_window = 1;
   if(what & 1) { /* delete previous */
@@ -1721,8 +1979,8 @@ static void snapped_wire(double c_snap)
 
 static int check_menu_start_commands(int state, double c_snap, int mx, int my)
 {
-  dbg(1, "check_menu_start_commands(): ui_state=%x, ui_state2=%x last_command=%d\n",
-      xctx->ui_state, xctx->ui_state2, xctx->last_command);
+  dbg(1, ("check_menu_start_commands(): ui_state=%x, ui_state2=%x last_command=%d\n",
+      xctx->ui_state, xctx->ui_state2, xctx->last_command));
 
   if((xctx->ui_state & MENUSTART) && (xctx->ui_state2 & MENUSTARTDESEL) ) {
     if(xctx->ui_state & DESEL_CLICK) {
@@ -1840,6 +2098,7 @@ static int add_wire_from_inst(Selected *sel, double mx, double my)
     int n = sel->n;
     xSymbol *symbol = xctx->sym + xctx->inst[n].ptr;
     int npin = symbol->rects[PINLAYER];
+    if(xctx->inst[n].ptr < 0) return res;
     for(i = 0; i < npin; ++i) {
       get_inst_pin_coord(n, i, &pinx0, &piny0);
       if(pinx0 == mx && piny0 == my) {
@@ -1847,7 +2106,7 @@ static int add_wire_from_inst(Selected *sel, double mx, double my)
       }
     }
     if(i < npin) {
-      dbg(1, "pin: %g %g\n", pinx0, piny0);
+      dbg(1, ("pin: %g %g\n", pinx0, piny0));
       unselect_all(1);
       start_wire(xctx->mousex_snap, xctx->mousey_snap);
       if(prev_state == STARTWIRE) {
@@ -1871,7 +2130,7 @@ static int add_wire_from_wire(Selected *sel, double mx, double my)
     double y1 = xctx->wire[n].y1;
     double x2 = xctx->wire[n].x2;
     double y2 = xctx->wire[n].y2;
-    dbg(1, "add_wire_from_wire\n");
+    dbg(1, ("add_wire_from_wire\n"));
     if( (mx == x1 && my == y1) || (mx == x2 && my == y2) ) {
       unselect_all(1);
       start_wire(xctx->mousex_snap, xctx->mousey_snap);
@@ -1889,7 +2148,7 @@ static int add_wire_from_wire(Selected *sel, double mx, double my)
 static int edit_line_point(int state)
 {
    int line_n = -1, line_c = -1;
-   dbg(1, "1 Line selected\n");
+   dbg(1, ("1 Line selected\n"));
    line_n = xctx->sel_array[0].n;
    line_c = xctx->sel_array[0].col;
   /* lineangle point: Check is user is clicking a control point of a lineangle */
@@ -1908,7 +2167,7 @@ static int edit_line_point(int state)
     if(xctx->shape_point_selected) {
       /* move one line selected point */
       if(!(state & (ControlMask | ShiftMask))){
-        /* xctx->push_undo(); */
+        /* xctx->push_undo(0); */
         move_objects(START,0,0,0);
         return 1;
       }
@@ -1921,7 +2180,7 @@ static int edit_line_point(int state)
 static int edit_wire_point(int state)
 {
    int wire_n = -1;
-   dbg(1, "edit_wire_point, ds = %g\n", xctx->cadhalfdotsize);
+   dbg(1, ("edit_wire_point, ds = %g\n", xctx->cadhalfdotsize));
    wire_n = xctx->sel_array[0].n;
   /* wire point: Check is user is clicking a control point of a wire */
   if(wire_n >= 0) {
@@ -1939,7 +2198,7 @@ static int edit_wire_point(int state)
     if(xctx->shape_point_selected) {
       /* move one wire selected point */
       if(!(state & (ControlMask | ShiftMask))){
-        /* xctx->push_undo(); */
+        /* xctx->push_undo(0); */
         move_objects(START,0,0,0);
         return 1;
       }
@@ -1952,12 +2211,12 @@ static int edit_wire_point(int state)
 static int edit_rect_point(int state)
 {
    int rect_n = -1, rect_c = -1;
-   dbg(1, "1 Rectangle selected\n");
+   dbg(1, ("1 Rectangle selected\n"));
    rect_n = xctx->sel_array[0].n;
    rect_c = xctx->sel_array[0].col;
   /* rectangle point: Check is user is clicking a control point of a rectangle */
   if(rect_n >= 0) {
-    double ds = xctx->cadhalfdotsize * 2 * xctx->zoom;
+    double ds = xctx->cadhalfdotsize * 4 * xctx->zoom * tk_scaling;
     xRect *p = &xctx->rect[rect_c][rect_n];
 
     xctx->need_reb_sel_arr=1;
@@ -1980,7 +2239,7 @@ static int edit_rect_point(int state)
     if(xctx->shape_point_selected) {
       /* move one rectangle selected point */
       if(!(state & (ControlMask | ShiftMask))){
-        /* xctx->push_undo(); */
+        /* xctx->push_undo(0); */
         move_objects(START,0,0,0);
         return 1;
       }
@@ -1993,7 +2252,7 @@ static int edit_rect_point(int state)
 static int edit_polygon_point(int state)
 {
    int poly_n = -1, poly_c = -1;
-   dbg(1, "1 Polygon selected\n");
+   dbg(1, ("1 Polygon selected\n"));
    poly_n = xctx->sel_array[0].n;
    poly_c = xctx->sel_array[0].col;
   /* polygon point: Check is user is clicking a control point of a polygon */
@@ -2010,7 +2269,7 @@ static int edit_polygon_point(int state)
           POINTINSIDE(xctx->mousex, xctx->mousey, p->x[i] - ds, p->y[i] - ds,
                         p->x[i] + ds, p->y[i] + ds)
         ) {
-          dbg(1, "selecting point %d\n", i);
+          dbg(1, ("selecting point %d\n", i));
           p->selected_point[i] = 1;
           xctx->shape_point_selected = 1;
           break;
@@ -2022,7 +2281,7 @@ static int edit_polygon_point(int state)
 
       /* add a new polygon/bezier point after selected one and start moving it*/
       if(state & ShiftMask) {
-        xctx->push_undo();
+        xctx->push_undo(0);
         points++;
         my_realloc(_ALLOC_ID_, &p->x, sizeof(double) * points);
         my_realloc(_ALLOC_ID_, &p->y, sizeof(double) * points);
@@ -2043,7 +2302,7 @@ static int edit_polygon_point(int state)
       }
       /* delete polygon/bezier selected point */
       else if(points > 2 && state & ControlMask) {
-        xctx->push_undo();
+        xctx->push_undo(0);
         points--;
         for(j = i ; j < points ; j++) {
            p->x[j] = p->x[j + 1];
@@ -2058,7 +2317,7 @@ static int edit_polygon_point(int state)
         return 1;
       /* move one polygon/bezier selected point */
       } else if(!(state & (ControlMask | ShiftMask))){
-        /* xctx->push_undo(); */
+        /* xctx->push_undo(0); */
         p->sel = SELECTED1;
         move_objects(START,0,0,0);
         return 1;
@@ -2253,8 +2512,8 @@ static void end_shape_point_edit(double c_snap)
 {
      int save = xctx->modified;
      double sx, sy;
-     dbg(1, "%g %g %g %g\n",
-         xctx->mx_double_save, xctx->my_double_save, xctx->mousex_snap, xctx->mousey_snap);
+     dbg(1, ("%g %g %g %g\n",
+         xctx->mx_double_save, xctx->my_double_save, xctx->mousex_snap, xctx->mousey_snap));
      if(xctx->lastsel == 1 && xctx->sel_array[0].type==POLYGON) {
         int k;
         int n = xctx->sel_array[0].n;
@@ -2357,7 +2616,19 @@ void unselect_attached_floaters(void)
 static void handle_enter_notify(int draw_xhair, int crosshair_size)
 {
     struct stat buf;
-    dbg(2, "callback(): Enter event, ui_state=%d\n", xctx->ui_state);
+    dbg(2, ("callback(): Enter event, ui_state=%d\n", xctx->ui_state));
+    
+    /* Issue a warning if underlying file has been touched */
+    dbg(1, ("handle_enter_notify(): warn_disk_file_modified=%d\n", xctx->warn_disk_file_modified));
+    if(xctx->warn_disk_file_modified == 1 && !stat(xctx->sch[xctx->currsch], &buf)) {
+      if(xctx->time_last_modify!= -1  && xctx->time_last_modify != buf.st_mtime) {
+        tclvareval("alert_ \"Schematic file: ", xctx->sch[xctx->currsch],
+            "\nHas been changed since opening.\" {}", NULL);
+        xctx->warn_disk_file_modified = 0;
+      }
+      dbg(1, ("handle_enter_notify(): %ld - %ld\n", xctx->time_last_modify, buf.st_mtime));
+    }
+
     xctx->mouse_inside = 1;
     if(draw_xhair) {
       if(crosshair_size == 0) {
@@ -2370,19 +2641,19 @@ static void handle_enter_notify(int draw_xhair, int crosshair_size)
        in another xschem xctx->window; STARTCOPY set and selection file does not exist any more */
     if(stat(sel_file, &buf) && (xctx->ui_state & STARTCOPY) )
     {
-      dbg(1, "xschem window *sending* selected objects: abort\n");
+      dbg(1, ("xschem window *sending* selected objects: abort\n"));
       copy_objects(ABORT);
       unselect_all(1);
     }
     /* xschem window *receiving* selected objects selection cleared --> abort */
     else if(xctx->paste_from == 1 && stat(sel_file, &buf) && (xctx->ui_state & STARTMERGE)) {
-      dbg(1, " xschem window *receiving* selected objects selection cleared: abort\n");
+      dbg(1, (" xschem window *receiving* selected objects selection cleared: abort\n"));
       abort_operation();
     }
     /*xschem window *receiving* selected objects
      * no selected objects and selection file exists --> start merge */
     else if(xctx->lastsel == 0 && !stat(sel_file, &buf)) {
-      dbg(1,"xschem window *receiving* selected objects: start merge\n");
+      dbg(1,("xschem window *receiving* selected objects: start merge\n"));
       xctx->mousex_snap = 490;
       xctx->mousey_snap = -340;
       merge_file(1, ".sch");
@@ -2556,7 +2827,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
             tclvareval("reconfigure_layers_button [winfo parent ", win_path, "]", NULL);
           }
         }
-        dbg(1, "callback(): new color: %d\n",xctx->color_index[xctx->rectcolor]);
+        dbg(1, ("callback(): new color: %d\n",xctx->color_index[xctx->rectcolor]));
       }
       break;
 
@@ -2584,7 +2855,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
             tclvareval("reconfigure_layers_button [winfo parent ", win_path, "]", NULL);
           }
         }
-        dbg(1, "callback(): new color: %d\n",xctx->color_index[xctx->rectcolor]);
+        dbg(1, ("callback(): new color: %d\n",xctx->color_index[xctx->rectcolor]));
       }
       break;
 
@@ -2896,7 +3167,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
             tool = tclgetintvar("sim(spicewave,default)");
             my_snprintf(str, PATH_MAX + 100, "sim(spicewave,%d,name)", tool);
             my_strdup(_ALLOC_ID_, &tool_name, tclgetvar(str));
-            dbg(1,"callback(): tool_name=%s\n", tool_name);
+            dbg(1,("callback(): tool_name=%s\n", tool_name));
             if(strstr(tool_name, "Gaw")) tool=GAW;
             else if(strstr(tool_name, "Bespice")) tool=BESPICE;
             my_free(_ALLOC_ID_, &tool_name);
@@ -3178,7 +3449,8 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
       }
       else if(rstate == ControlMask) { /* clear schematic */
         if(xctx->semaphore >= 2) break;
-        tcleval("xschem clear schematic");
+        /* cancel=1: ask user to save if modified */
+        clear_schematic(1, 0);
       }
       break;
 
@@ -3189,7 +3461,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
         if(xctx->semaphore >= 2) break;
         unselect_all(1);
         if( set_netlist_dir(0, NULL) ) {
-          dbg(1, "callback(): -------------\n");
+          dbg(1, ("callback(): -------------\n"));
           if(xctx->netlist_type == CAD_SPICE_NETLIST)
             err = global_spice_netlist(0, 1);
           else if(xctx->netlist_type == CAD_VHDL_NETLIST)
@@ -3203,11 +3475,11 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
           else
             tcleval("tk_messageBox -type ok -parent [xschem get topwindow] "
                     "-message {Please Set netlisting mode (Options menu)}");
-          dbg(1, "callback(): -------------\n");
+          dbg(1, ("callback(): -------------\n"));
         }
         else {
            if(has_x) tcleval("alert_ {Can not write into the netlist directory. Please check} {}");
-           else dbg(0, "Can not write into the netlist directory. Please check");
+           else info("Can not write into the netlist directory. Please check");
            err = 1;
         }
         if(err) {
@@ -3232,8 +3504,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
     case 'o':
       if(EQUAL_MODMASK) { /* load in new tab/window */
         xctx->semaphore--;
-        ask_new_file(1, NULL);
-        tcleval("load_additional_files");
+        if(ask_new_file(1, NULL)) tcleval("load_additional_files");
         xctx->semaphore++;
       }
       else if(rstate == ControlMask) { /* load */
@@ -3242,8 +3513,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
           tcleval("file_chooser");
         } else {
           xctx->semaphore--;
-          ask_new_file(0, NULL);
-          tcleval("load_additional_files");
+          if(ask_new_file(0, NULL)) tcleval("load_additional_files");
           xctx->semaphore++;
         }
       }
@@ -3273,7 +3543,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
 
     case 'p':
       if(EQUAL_MODMASK) { /* add symbol pin */
-        xctx->push_undo();
+        xctx->push_undo(0);
         unselect_all(1);
         storeobject(-1, xctx->mousex_snap-2.5, xctx->mousey_snap-2.5, xctx->mousex_snap+2.5, xctx->mousey_snap+2.5,
                     xRECT, PINLAYER, SELECTED, "name=XXX\ndir=inout");
@@ -3287,7 +3557,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
       }
       else if( !(xctx->ui_state & STARTPOLYGON) && rstate==0) { /* start polygon */
         if(xctx->semaphore >= 2) break;
-        dbg(1, "callback(): start polygon\n");
+        dbg(1, ("callback(): start polygon\n"));
         if(infix_interface) {
           xctx->mx_double_save=xctx->mousex_snap;
           xctx->my_double_save=xctx->mousey_snap;
@@ -3352,7 +3622,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
 
     case 'r':
       if(/* !xctx->ui_state && */ rstate==0) { /* start rect */
-        dbg(1, "callback(): start rect\n");
+        dbg(1, ("callback(): start rect\n"));
         if(xctx->semaphore >= 2) break;
         if(infix_interface) {
           xctx->mx_double_save=xctx->mousex_snap;
@@ -3526,7 +3796,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
       }
       else if(EQUAL_MODMASK) { /* align to grid */
         if(xctx->semaphore >= 2) break;
-        xctx->push_undo();
+        xctx->push_undo(0);
         round_schematic_to_grid(c_snap);
         set_modify(1);
         if(tclgetboolvar("autotrim_wires")) trim_wires();
@@ -3625,7 +3895,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
       else if(rstate == ControlMask) { /* toggle spice/vhdl netlist */
         xctx->netlist_type++;
         if(xctx->netlist_type==7) xctx->netlist_type=1;
-        set_tcl_netlist_type();
+        set_tcl_netlist_type(xctx);
         draw(); /* needed to ungrey or grey out  components due to *_ignore attribute */
       }
       break;
@@ -3652,6 +3922,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
         int save_sem;
         if(xctx->semaphore >= 2) break;
         save_sem = xctx->semaphore;
+        xctx->semaphore = 0;
         tcleval("xschem exit");
         xctx->semaphore = save_sem;
       }
@@ -3705,7 +3976,7 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
     case 'z':
       /* zoom box */
       if(rstate == 0 && !(xctx->ui_state & (STARTRECT | STARTLINE | STARTWIRE | STARTPOLYGON | STARTARC))) {
-        dbg(1, "callback(): zoom_rectangle call\n");
+        dbg(1, ("callback(): zoom_rectangle call\n"));
         zoom_rectangle(START);
       }
       else if(rstate==ControlMask) { /* zoom out */
@@ -4039,14 +4310,14 @@ static void handle_key_press(int event, KeySym key, int state, int rstate, int m
 
     case '&':                               /* check wire connectivity */
       if(xctx->semaphore >= 2) break;
-      xctx->push_undo();
+      xctx->push_undo(0);
       trim_wires();
       draw();
       break;
 
     case '\\':
       if(state==0) { /* fullscreen */
-        dbg(1, "callback(): toggle fullscreen, win_path=%s\n", win_path);
+        dbg(1, ("callback(): toggle fullscreen, win_path=%s\n", win_path));
         toggle_fullscreen(win_path);
       }
       break;
@@ -4135,8 +4406,8 @@ static void handle_button_press(int event, int state, int rstate, KeySym key, in
 
    state &= ~(Button1Mask | Button2Mask | Button3Mask | Button4Mask | Button5Mask ); /* ignore ButtonStates */
    if(!tabbed_interface && strcmp(win_path, xctx->current_win_path)) return;
-   dbg(1, "callback(): ButtonPress  ui_state=%d state=%d semaphore=%d\n",xctx->ui_state,state, xctx->semaphore);
-   dbg(1, "callback(): win_path=%s\n", win_path);
+   dbg(1, ("callback(): ButtonPress  ui_state=%d state=%d semaphore=%d\n",xctx->ui_state,state, xctx->semaphore));
+   dbg(1, ("callback(): win_path=%s\n", win_path));
    if(waves_selected(event, key, state, button)) {
      waves_callback(event, mx, my, key, button, aux, state);
      return;
@@ -4292,7 +4563,7 @@ static void handle_button_press(int event, int state, int rstate, KeySym key, in
        } else {
          sel = find_closest_obj(xctx->mousex, xctx->mousey, 0);
        }
-       dbg(1, "sel.type=%d\n", sel.type);
+       dbg(1, ("sel.type=%d sel.n=%d\n", sel.type, sel.n));
        /* determine if closest object was already selected when button1 was pressed */
        switch(sel.type) {
          case WIRE:    if(xctx->wire[sel.n].sel)          already_selected = 1; break;
@@ -4322,7 +4593,7 @@ static void handle_button_press(int event, int state, int rstate, KeySym key, in
        /* select the object under the mouse and rebuild the selected array */
        if(!already_selected) select_object(xctx->mousex, xctx->mousey, SELECTED, 0, &sel);
        rebuild_selected_array();
-       dbg(1, "Button1Press to select objects, lastsel = %d\n", xctx->lastsel);
+       dbg(1, ("Button1Press to select objects, lastsel = %d\n", xctx->lastsel));
 
        /* if clicking on some object endpoints or vertices set shape_point_selected
         * this information will be used in Motion events to draw the stretched vertices */
@@ -4344,7 +4615,7 @@ static void handle_button_press(int event, int state, int rstate, KeySym key, in
           if(edit_wire_point(state)) return; /* sets xctx->shape_point_selected */
          }
        }
-       dbg(1, "shape_point_selected=%d, lastsel=%d\n", xctx->shape_point_selected, xctx->lastsel);
+       dbg(1, ("shape_point_selected=%d, lastsel=%d\n", xctx->shape_point_selected, xctx->lastsel));
 
        /* intuitive interface: directly drag elements */
        if(sel.type && xctx->intuitive_interface && xctx->lastsel >= 1 &&
@@ -4399,7 +4670,7 @@ static void handle_button_release(int event, KeySym key, int state, int button, 
      return;
    }
    xctx->ui_state &= ~DESEL_CLICK;
-   dbg(1, "release: shape_point_selected=%d\n", xctx->shape_point_selected);
+   dbg(1, ("release: shape_point_selected=%d\n", xctx->shape_point_selected));
    /* bring up context menu if no pending operation */
    if(state == Button3Mask && xctx->semaphore <2) {
      if(!end_place_move_copy_zoom()) {
@@ -4421,9 +4692,9 @@ static void handle_button_release(int event, KeySym key, int state, int button, 
       !xctx->shape_point_selected && (xctx->ui_state & STARTMOVE) && xctx->mouse_moved == 0) {
      int savesem = xctx->semaphore;
      move_objects(ABORT, 0, 0.0, 0.0);
-     unselect_all(1);
+     /* unselect_all(1); */
      xctx->drag_elements = 0; /* after ctrl-Button1Press on a launcher need to clear this */
-     select_object(xctx->mousex, xctx->mousey, SELECTED, 0, NULL);
+     /* select_object(xctx->mousex, xctx->mousey, SELECTED, 0, NULL); */
      rebuild_selected_array();
      xctx->semaphore = 0;
      launcher(); /* works only if lastsel == 1 */
@@ -4493,7 +4764,7 @@ static void handle_button_release(int event, KeySym key, int state, int button, 
      redraw_w_a_l_r_p_z_rubbers(1);
      return;
    }
-   dbg(1, "callback(): ButtonRelease  ui_state=%d state=%d\n",xctx->ui_state,state);
+   dbg(1, ("callback(): ButtonRelease  ui_state=%d state=%d\n",xctx->ui_state,state));
    if(xctx->semaphore >= 2) return;
    if(xctx->ui_state & STARTSELECT) {
      if(state & ControlMask) {
@@ -4529,7 +4800,7 @@ static void handle_double_click(int event, int state, KeySym key, int button,
       return;
     } else {
      if(xctx->semaphore >= 2) return;
-     dbg(1, "callback(): DoubleClick  ui_state=%d state=%d\n",xctx->ui_state,state);
+     dbg(1, ("callback(): DoubleClick  ui_state=%d state=%d\n",xctx->ui_state,state));
      if(button==Button1) {
        Selected sel;
        if(!xctx->lastsel && xctx->ui_state ==  0) {
@@ -4655,35 +4926,35 @@ static int handle_window_switching(int event, int tabbed_interface, const char *
       struct stat buf;
 
       if(xctx->pending_fullzoom == 1) return 0; /* no switching if opening a new window */
-      dbg(1, "handle_window_switching(): event=%d, ui_state=%d win_path=%s\n",
-          event, xctx->ui_state, win_path);
+      dbg(1, ("handle_window_switching(): event=%d, ui_state=%d win_path=%s\n",
+          event, xctx->ui_state, win_path));
       /* This will switch context only when copying stuff across windows
        * this is the window *receiving* copied objects */
       tcleval("destroy .ctxmenu");
       if( event == EnterNotify && !stat(sel_file, &buf) && (xctx->ui_state & STARTCOPY)) {
-        dbg(1, "callback(): switching window context for copy : %s --> %s, semaphore=%d\n",
-                xctx->current_win_path, win_path, xctx->semaphore);
+        dbg(1, ("callback(): switching window context for copy : %s --> %s, semaphore=%d\n",
+                xctx->current_win_path, win_path, xctx->semaphore));
         new_schematic("switch", win_path, "", 1);
       /* switch context to window *sending* copied objects, when returning back in */
       } else if( event == EnterNotify && /* stat(sel_file, &buf) && */ (save_xctx[n]->ui_state & STARTCOPY)) {
-        dbg(1, "callback(): switching window context for copy : %s --> %s, semaphore=%d\n",
-                xctx->current_win_path, win_path, xctx->semaphore);
+        dbg(1, ("callback(): switching window context for copy : %s --> %s, semaphore=%d\n",
+                xctx->current_win_path, win_path, xctx->semaphore));
         redraw_only = 1;
-        my_strncpy(old_win_path, xctx->current_win_path, S(old_win_path));
+        my_strdup2(_ALLOC_ID_, &old_win_path, xctx->current_win_path);
         new_schematic("switch_no_tcl_ctx", win_path, "", 1);
       /* This does a "temporary" switch just to redraw obscured window parts */
       } else if(event == Expose || xctx->semaphore >= 1 ) {
-        dbg(1, "callback(): switching window context for redraw ONLY: %s --> %s\n",
-                xctx->current_win_path, win_path);
+        dbg(1, ("callback(): switching window context for redraw ONLY: %s --> %s\n",
+                xctx->current_win_path, win_path));
         redraw_only = 1;
-        my_strncpy(old_win_path, xctx->current_win_path, S(old_win_path));
+        my_strdup2(_ALLOC_ID_, &old_win_path, xctx->current_win_path);
         new_schematic("switch_no_tcl_ctx", win_path, "", 1);
       /* this is the regular context switch when window gets focused */
       } else if(event == FocusIn && xctx->semaphore == 0) {
-        dbg(1, "callback(): switching window context: %s --> %s, semaphore=%d\n",
-                xctx->current_win_path, win_path, xctx->semaphore);
+        dbg(1, ("callback(): switching window context: %s --> %s, semaphore=%d\n",
+                xctx->current_win_path, win_path, xctx->semaphore));
         new_schematic("switch", win_path, "", 1);
-        dbg(1, "switching to %s\n", win_path);
+        dbg(1, ("switching to %s\n", win_path));
       }
 
     }
@@ -4717,7 +4988,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
 
 
   if(xctx->semaphore >= 3) {
-    dbg(1, "reentrant callback() call disabled, semaphore = %d\n", xctx->semaphore);
+    dbg(1, ("reentrant callback() call disabled, semaphore = %d\n", xctx->semaphore));
     return 0;
   }
   /* this fix uses an alternative method for getting mouse coordinates on KeyPress/KeyRelease
@@ -4729,7 +5000,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
       mx = atoi(tclresult());
       tclvareval("getmousey ", win_path, NULL);
       my = atoi(tclresult());
-      dbg(1, "mx = %d  my=%d\n", mx, my);
+      dbg(1, ("mx = %d  my=%d\n", mx, my));
     }
   }
 
@@ -4738,7 +5009,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
   #if 0
   /* exclude Motion and Expose events */
   if(event!=6 /* && event!=12 */) {
-    dbg(0, "callback(): state=%d event=%d, win_path=%s, current_win_path=%s, old_win_path=%s, semaphore=%d\n",
+    info("callback(): state=%d event=%d, win_path=%s, current_win_path=%s, old_win_path=%s, semaphore=%d\n",
             state, event, win_path, xctx->current_win_path, old_win_path, xctx->semaphore+1);
   }
   #endif
@@ -4750,7 +5021,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
    * so we don't need  to switch tcl context which is costly performance-wise
    */
   if(redraw_only) {
-    dbg(1, "callback(): incrementing semaphore for redraw_only\n");
+    dbg(1, ("callback(): incrementing semaphore for redraw_only\n"));
     xctx->semaphore++;
   }
 
@@ -4758,7 +5029,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
 
 
   /* file exists and modification time on disk has changed since file loaded ... */
-  if(!xctx->modified && !stat( xctx->sch[xctx->currsch], &buf) && xctx->time_last_modify &&
+  if(!xctx->modified && !stat( xctx->sch[xctx->currsch], &buf) && xctx->time_last_modify != -1  &&
      xctx->time_last_modify != buf.st_mtime) {
      set_modify(1);
   }
@@ -4776,7 +5047,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
   {
     if(debug_var>=2)
       if(event != MotionNotify)
-        fprintf(errfp, "callback(): reentrant call of callback(), semaphore=%d, ev=%d, ui_state=%d\n",
+        info("callback(): reentrant call of callback(), semaphore=%d, ev=%d, ui_state=%d\n",
                 xctx->semaphore, event, xctx->ui_state);
   }
   xctx->mousex=X_TO_XSCHEM(mx);
@@ -4790,7 +5061,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
     statusmsg(str,1);
   }
 
-  dbg(2, "key=%d EQUAL_MODMASK=%d, SET_MODMASK=%d\n", key, SET_MODMASK, EQUAL_MODMASK);
+  dbg(2, ("key=%d EQUAL_MODMASK=%d, SET_MODMASK=%d\n", key, SET_MODMASK, EQUAL_MODMASK));
 
   #if defined(__unix__) && HAS_CAIRO==1
   if(xctx->ui_state & GRABSCREEN) {
@@ -4816,7 +5087,7 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
      break;
 
    case ConfigureNotify:
-     dbg(1,"callback(): ConfigureNotify event: %s %dx%d\n", win_path, button, aux);
+     dbg(1,("callback(): ConfigureNotify event: %s %dx%d\n", win_path, button, aux));
      resetwin(1, 1, 0, 0, 0);
      draw();
      break;
@@ -4858,16 +5129,16 @@ int callback(const char *win_path, int event, int mx, int my, KeySym key, int bu
      break;
 
    default:
-    dbg(1, "callback(): Event:%d\n",event);
+    dbg(1, ("callback(): Event:%d\n",event));
     break;
   } /* switch(event) */
 
   if(xctx->semaphore > 0) xctx->semaphore--;
   if(redraw_only) {
     xctx->semaphore--; /* decrement articially incremented semaphore (see above) */
-    dbg(1, "callback(): semaphore >=2 restoring window context: %s <-- %s\n", old_win_path, win_path);
+    dbg(1, ("callback(): semaphore >=2 restoring window context: %s <-- %s\n", old_win_path, win_path));
     if(old_win_path[0]) new_schematic("switch_no_tcl_ctx", old_win_path, "", 1);
-    my_strncpy(old_win_path, xctx->current_win_path, S(old_win_path));
+    my_strdup2(_ALLOC_ID_, &old_win_path, xctx->current_win_path);
   }
   return 0;
 }

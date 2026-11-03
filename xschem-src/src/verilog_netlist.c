@@ -46,7 +46,7 @@ static int verilog_netlist(FILE *fd , int verilog_stop)
    for(i=0;i<xctx->instances; ++i) /* ... print all element except ipin opin labels use package */
    {
     if(skip_instance(i, 1, lvs_ignore)) continue;
-    dbg(2, "verilog_netlist():       into the netlisting loop\n");
+    dbg(2, ("verilog_netlist():       into the netlisting loop\n"));
     my_strdup(_ALLOC_ID_, &type,(xctx->inst[i].ptr+ xctx->sym)->type);
     if( type &&
        ( !IS_LABEL_SH_OR_PIN(type) &&
@@ -70,7 +70,7 @@ static int verilog_netlist(FILE *fd , int verilog_stop)
    }
    my_free(_ALLOC_ID_, &type);
  }
- dbg(1, "verilog_netlist():       end\n");
+ dbg(1, ("verilog_netlist():       end\n"));
  if(!verilog_stop && !xctx->netlist_count) redraw_hilights(0); /*draw_hilight_net(1); */
  return err;
 }
@@ -101,10 +101,10 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
 
  exit_code = 0; /* reset exit code */
  split_f = tclgetboolvar("split_files");
- xctx->push_undo();
+ xctx->push_undo(6); /* use reserved slot 1 of undo stack */
  xctx->netlist_unconn_cnt=0; /* unique count of unconnected pins while netlisting */
  statusmsg("",2);  /* clear infowindow */
- str_hash_init(&subckt_table, HASHSIZE);
+ str_hash_init(&subckt_table, 367);
  xctx->netlist_count=0;
  /* top sch properties used for library use declarations and type definitions */
  /* to be printed before any entity declarations */
@@ -113,7 +113,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
    tclgetvar("netlist_dir"), get_cell(xctx->sch[xctx->currsch], 0),getpid());
  fd=fopen(netl_filename, "w");
  if(fd==NULL){
-   dbg(0, "global_verilog_netlist(): problems opening netlist file\n");
+   info("global_verilog_netlist(): problems opening netlist file\n");
    return 1;
  }
  fprintf(fd, "// sch_path: %s\n", xctx->sch[xctx->currsch]);
@@ -124,7 +124,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
    my_snprintf(cellname, S(cellname), "%s.v", get_cell(xctx->sch[xctx->currsch], 0));
  }
 
- dbg(1, "global_verilog_netlist(): opening %s for writing\n",netl_filename);
+ dbg(1, ("global_verilog_netlist(): opening %s for writing\n",netl_filename));
 
 
 
@@ -148,18 +148,17 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
 
 
 
- dbg(1, "global_verilog_netlist(): printing top level entity\n");
+ dbg(1, ("global_verilog_netlist(): printing top level entity\n"));
  fprintf(fd,"module %s (\n", get_cell( xctx->sch[xctx->currsch], 0) );
  /* flush data structures (remove unused symbols) */
  unselect_all(1);
  if(!tclgetboolvar("keep_symbols")) remove_symbols();
  /* reload data without popping undo stack, this populates embedded symbols if any */
- xctx->pop_undo(2, 0);
- /* link_symbols_to_instances(-1); */ /* done in xctx->pop_undo() */
- dbg(1, "global_verilog_netlist(): sch[currsch]=%s\n", xctx->sch[xctx->currsch]);
+ xctx->pop_undo(6, 0); /* use reserved slot 1 of undo stack */
+ dbg(1, ("global_verilog_netlist(): sch[currsch]=%s\n", xctx->sch[xctx->currsch]));
 
  /* print top subckt port directions */
- dbg(1, "global_verilog_netlist(): printing top level out pins\n");
+ dbg(1, ("global_verilog_netlist(): printing top level out pins\n"));
  tmp=0;
  for(i=0;i<xctx->instances; ++i)
  {
@@ -174,7 +173,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
   }
  }
 
- dbg(1, "global_verilog_netlist(): printing top level inout pins\n");
+ dbg(1, ("global_verilog_netlist(): printing top level inout pins\n"));
  for(i=0;i<xctx->instances; ++i)
  {
   if(skip_instance(i, 1, lvs_ignore)) continue;
@@ -188,7 +187,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
   }
  }
 
- dbg(1, "global_verilog_netlist(): printing top level input pins\n");
+ dbg(1, ("global_verilog_netlist(): printing top level input pins\n"));
  for(i=0;i<xctx->instances; ++i)
  {
   if(skip_instance(i, 1, lvs_ignore)) continue;
@@ -207,16 +206,16 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
  /* 20071006 print top level params if defined in symbol */
  str_tmp = add_ext(xctx->sch[xctx->currsch], ".sym");
  if(!stat(str_tmp, &buf)) {
-   load_sym_def(str_tmp, NULL);
+   load_sym_def(str_tmp, NULL, NULL);
    print_verilog_param(fd,xctx->symbols-1);  /* added print top level params */
-   remove_symbol(xctx->symbols - 1);
+   remove_symbol(xctx->symbols - 1, 1);
  }
  /* 20071006 end */
 
 
 
  /* print top subckt port types */
- dbg(1, "global_verilog_netlist(): printing top level out pins\n");
+ dbg(1, ("global_verilog_netlist(): printing top level out pins\n"));
  for(i=0;i<xctx->instances; ++i)
  {
   if(skip_instance(i, 1, lvs_ignore)) continue;
@@ -235,7 +234,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
   }
  }
 
- dbg(1, "global_verilog_netlist(): printing top level inout pins\n");
+ dbg(1, ("global_verilog_netlist(): printing top level inout pins\n"));
  for(i=0;i<xctx->instances; ++i)
  {
   if(skip_instance(i, 1, lvs_ignore)) continue;
@@ -254,7 +253,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
   }
  }
 
- dbg(1, "global_verilog_netlist(): printing top level input pins\n");
+ dbg(1, ("global_verilog_netlist(): printing top level input pins\n"));
  for(i=0;i<xctx->instances; ++i)
  {
   if(skip_instance(i, 1, lvs_ignore)) continue;
@@ -273,7 +272,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
   }
  }
 
- dbg(1, "global_verilog_netlist(): netlisting  top level\n");
+ dbg(1, ("global_verilog_netlist(): netlisting  top level\n"));
  err |= verilog_netlist(fd, 0);
  xctx->netlist_count++;
  fprintf(fd,"---- begin user architecture code\n");
@@ -299,10 +298,10 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
    my_snprintf(tcl_cmd_netlist, S(tcl_cmd_netlist), "netlist {%s} noshow {%s}", netl_filename, cellname);
    save = xctx->netlist_type;
    xctx->netlist_type = CAD_VERILOG_NETLIST;
-   set_tcl_netlist_type();
+   set_tcl_netlist_type(xctx);
    tcleval(tcl_cmd_netlist);
    xctx->netlist_type = save;
-   set_tcl_netlist_type();
+   set_tcl_netlist_type(xctx);
    if(debug_var==0) xunlink(netl_filename);
  }
 
@@ -317,19 +316,20 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
    int saved_hilight_nets = xctx->hilight_nets;
    int web_url = is_from_web(xctx->current_dirname);
    char *current_dirname_save = NULL;
-
+   char *topschname = NULL;
+ 
+   my_strdup2(_ALLOC_ID_, &topschname, xctx->current_name);
    unselect_all(1);
    /* ensure all unused symbols purged before descending hierarchy */
    if(!tclgetboolvar("keep_symbols")) remove_symbols();
    /* reload data without popping undo stack, this populates embedded symbols if any */
-   xctx->pop_undo(2, 0);
-   /* link_symbols_to_instances(-1); */ /* done in xctx->pop_undo() */
+   xctx->pop_undo(6, 0); /* use reserved slot 1 of undo stack */
    my_strdup(_ALLOC_ID_, &xctx->sch_path[xctx->currsch+1], xctx->sch_path[xctx->currsch]);
    my_strcat(_ALLOC_ID_, &xctx->sch_path[xctx->currsch+1], "->netlisting");
    xctx->sch_path_hash[xctx->currsch+1] = 0;
    xctx->currsch++;
 
-   dbg(2, "global_verilog_netlist(): last defined symbol=%d\n",xctx->symbols);
+   dbg(2, ("global_verilog_netlist(): last defined symbol=%d\n",xctx->symbols));
    subckt_name=NULL;
    get_additional_symbols(1);
    for(i=0;i<xctx->symbols; ++i)
@@ -337,6 +337,20 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
     if(xctx->sym[i].flags & (VERILOG_IGNORE | VERILOG_SHORT)) continue;
     if(lvs_ignore && (xctx->sym[i].flags & LVS_IGNORE)) continue;
     if(!xctx->sym[i].type) continue;
+
+    /* store parent symbol template attr (before descending into it) and parent instance prop_ptr
+     * into xctx->hier_attr[0].templ and xctx->hier_attr[0.prop_ptr,
+     * to resolve subschematic instances with model=@modp in format string,
+     * modp will be first looked up in instance prop_ptr string, and if not found
+     * in parent symbol template string */
+    my_strdup(_ALLOC_ID_, &xctx->hier_attr[xctx->currsch - 1].templ,
+              tcl_hook2(xctx->sym[i].templ));
+    /* only additional symbols (created with instance schematic=... attr) will have this attribute */
+    my_strdup(_ALLOC_ID_, &xctx->hier_attr[xctx->currsch - 1].prop_ptr,
+              tcl_hook2(xctx->sym[i].parent_prop_ptr));
+    my_strdup(_ALLOC_ID_, &xctx->hier_attr[xctx->currsch - 1].sym_extra,
+      get_tok_value(xctx->sym[i].prop_ptr, "extra", 0));
+
     my_strdup2(_ALLOC_ID_, &abs_path, abs_sym_path(tcl_hook2(xctx->sym[i].name), ""));
     if(strcmp(xctx->sym[i].type,"subcircuit")==0 && check_lib(1, abs_path)) {
       if(!web_url) {
@@ -373,7 +387,13 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
    /* symbol vs schematic pin check, we do it here since now we have ALL symbols loaded */
    err |= sym_vs_sch_pins(-1);
    if(!tclgetboolvar("keep_symbols")) remove_symbols();
-   xctx->pop_undo(4, 0);
+
+   my_strncpy(xctx->current_name, topschname, S(xctx->current_name));
+   if(tclgetboolvar("preserve_undo")) {
+     save_undo_table(xctx->current_name, NULL, XGET); /* sets xctx->undo_initialized = 0 if not found */
+   }       
+
+   xctx->pop_undo(6, 0); /* use reserved slot 1 of undo stack */
    xctx->prev_set_modify = save_prev_mod;
    if(web_url) {
      my_strncpy(xctx->current_dirname, current_dirname_save, S(xctx->current_dirname));
@@ -385,6 +405,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
    err |= prepare_netlist_structs(1); /* so 'lab=...' attributes for unnamed nets are set */
    if(!xctx->hilight_nets) xctx->hilight_nets = saved_hilight_nets;
    my_free(_ALLOC_ID_, &current_dirname_save);
+   my_free(_ALLOC_ID_, &topschname);
  }
  /* restore hilight flags from errors found analyzing top level before descending hierarchy */
  for(i=0;i<xctx->instances; ++i) if(!xctx->inst[i].color) xctx->inst[i].color = stored_flags[i];
@@ -393,7 +414,7 @@ int global_verilog_netlist(int global, int alert)  /* netlister driver */
  draw_hilight_net(1);
  my_free(_ALLOC_ID_, &stored_flags);
 
- dbg(1, "global_verilog_netlist(): starting awk on netlist!\n");
+ dbg(1, ("global_verilog_netlist(): starting awk on netlist!\n"));
  if(!split_f) {
    fclose(fd);
    if(tclgetboolvar("netlist_show")) {
@@ -456,17 +477,17 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
   if(split_f) {
     my_snprintf(netl_filename, S(netl_filename), "%s/.%s_%d",
        tclgetvar("netlist_dir"),  get_cell(name, 0), getpid());
-    dbg(1, "verilog_block_netlist(): split_files: netl_filename=%s\n", netl_filename);
+    dbg(1, ("verilog_block_netlist(): split_files: netl_filename=%s\n", netl_filename));
     fd=fopen(netl_filename, "w");
     if(!fd) {
-      dbg(0, "verilog_block_netlist(): unable to write file %s\n", netl_filename);
+      info("verilog_block_netlist(): unable to write file %s\n", netl_filename);
       err = 1;
       goto err;
     }
     my_snprintf(cellname, S(cellname), "%s.v", get_cell(name, 0));
 
   }
-  dbg(1, "verilog_block_netlist(): expanding %s\n",  name);
+  dbg(1, ("verilog_block_netlist(): expanding %s\n",  name));
   fprintf(fd, "\n// expanding   symbol:  %s # of pins=%d\n", name, xctx->sym[i].rects[PINLAYER] );
   if(xctx->sym[i].base_name) fprintf(fd, "// sym_path: %s\n", abs_sym_path(xctx->sym[i].base_name, ""));
   else fprintf(fd, "// sym_path: %s\n", sanitized_abs_sym_path(name, ""));
@@ -479,7 +500,13 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
     my_strdup(_ALLOC_ID_, &extra, get_tok_value(xctx->sym[i].prop_ptr, "verilog_extra", 0));
     my_strdup(_ALLOC_ID_, &extra2, get_tok_value(xctx->sym[i].prop_ptr, "verilog_extra", 0));
     fprintf(fd, "// sch_path: %s\n", sanitized_abs_sym_path(filename, ""));
+
     verilog_stop? load_schematic(0,filename, 0, alert) : load_schematic(1,filename, 0, alert);
+
+    if(tclgetboolvar("preserve_undo")) {
+      if(save_undo_table(xctx->current_name, NULL, XGET)) xctx->pop_undo(2, 0);
+    }
+
     get_additional_symbols(1);
     /* print verilog timescale  and preprocessor directives 10102004 */
     fmt_attr = xctx->format ? xctx->format : "verilog_format";
@@ -498,7 +525,6 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
      }
     }
 
-
     my_strdup(_ALLOC_ID_, &verilogprefix,
        get_tok_value(xctx->sym[i].prop_ptr, "verilogprefix", 0));
     if(verilogprefix) {
@@ -509,25 +535,29 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
     }
     my_free(_ALLOC_ID_, &verilogprefix);
 
-
-
     fprintf(fd, "module %s (\n", sanitize(symname));
     my_free(_ALLOC_ID_, &symname);
     /*print_generic(fd, "entity", i); */
 
-    dbg(1, "verilog_block_netlist():       entity ports\n");
+    dbg(1, ("verilog_block_netlist():       entity ports\n"));
 
     /* print port list */
     tmp=0;
     for(j=0;j<xctx->sym[i].rects[PINLAYER]; ++j)
     {
       if(strboolcmp(get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr,"verilog_ignore",0), "true")) {
-        const char *name = get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr, "name", 0);
-        if(!int_hash_lookup(&table, name, 1, XINSERT_NOREPLACE)) {
+        char *name = NULL;
+        char *tr_name = NULL;
+        my_strdup2(_ALLOC_ID_, &name, get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr, "name", 0));
+        translate3(name, -1, 1, xctx->currsch > 0 ? xctx->hier_attr[xctx->currsch - 1].prop_ptr : NULL,
+           NULL, NULL, NULL, &tr_name);
+        if(!int_hash_lookup(&table, tr_name, 1, XINSERT_NOREPLACE)) {
           if(tmp) fprintf(fd, " ,\n");
           ++tmp;
-          fprintf(fd,"  %s", name);
+          fprintf(fd,"  %s", eval_expr(tr_name));
         }
+        my_free(_ALLOC_ID_, &name);
+        my_free(_ALLOC_ID_, &tr_name);
       }
     }
     int_hash_free(&table);
@@ -543,13 +573,15 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
     }
     fprintf(fd, "\n);\n");
 
-    dbg(1, "verilog_block_netlist():       entity generics\n");
+    dbg(1, ("verilog_block_netlist():       entity generics\n"));
     /* print module  default parameters */
     print_verilog_param(fd,i);
     /* print port types */
     int_hash_init(&table, 37);
     for(j=0;j<xctx->sym[i].rects[PINLAYER]; ++j)
     {
+      char *name = NULL;
+      char *tr_name = NULL;
       if(strboolcmp(get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr,"verilog_ignore",0), "true")) {
         my_strdup(_ALLOC_ID_, &sig_type,get_tok_value(
                   xctx->sym[i].rect[PINLAYER][j].prop_ptr,"verilog_type",0));
@@ -562,14 +594,20 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
            if(!sig_type || sig_type[0]=='\0') my_strdup(_ALLOC_ID_, &sig_type,"wire");
         }
         str_tmp = get_tok_value(xctx->sym[i].rect[PINLAYER][j].prop_ptr,"name",0);
-        if(!int_hash_lookup(&table, str_tmp, 1, XINSERT_NOREPLACE)) {
+        my_strdup2(_ALLOC_ID_, &name, str_tmp);
+        translate3(name, -1, 1, xctx->currsch > 0 ? xctx->hier_attr[xctx->currsch - 1].prop_ptr : NULL,
+           NULL, NULL, NULL, &tr_name);
+
+        if(!int_hash_lookup(&table, tr_name, 1, XINSERT_NOREPLACE)) {
           fprintf(fd,"  %s %s ;\n",
-            strcmp(dir_tmp,"in")? ( strcmp(dir_tmp,"out")? "inout" :"output"  ) : "input", str_tmp);
-          fprintf(fd,"  %s %s", sig_type, str_tmp);
+            strcmp(dir_tmp,"in")? ( strcmp(dir_tmp,"out")? "inout" :"output"  ) : "input", eval_expr(tr_name));
+          fprintf(fd,"  %s %s", sig_type, eval_expr(tr_name));
           if(port_value &&port_value[0])
             fprintf(fd," = %s", port_value);
           fprintf(fd," ;\n");
         }
+        my_free(_ALLOC_ID_, &name);
+        my_free(_ALLOC_ID_, &tr_name);
       }
     }
     int_hash_free(&table);
@@ -591,7 +629,7 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
       }
       my_free(_ALLOC_ID_, &verilog_extra_dir);
     }
-    dbg(1, "verilog_block_netlist():       netlisting %s\n", get_cell( xctx->sch[xctx->currsch], 0));
+    dbg(1, ("verilog_block_netlist():       netlisting %s\n", get_cell( xctx->sch[xctx->currsch], 0)));
     err |= verilog_netlist(fd, verilog_stop);
     fprintf(fd,"---- begin user architecture code\n");
     for(l=0;l<xctx->instances; ++l) {
@@ -624,10 +662,10 @@ int verilog_block_netlist(FILE *fd, int i, int alert)
     my_snprintf(tcl_cmd_netlist, S(tcl_cmd_netlist), "netlist {%s} noshow {%s}", netl_filename, cellname);
     save = xctx->netlist_type;
     xctx->netlist_type = CAD_VERILOG_NETLIST;
-    set_tcl_netlist_type();
+    set_tcl_netlist_type(xctx);
     tcleval(tcl_cmd_netlist);
     xctx->netlist_type = save;
-    set_tcl_netlist_type();
+    set_tcl_netlist_type(xctx);
     if(debug_var==0) xunlink(netl_filename);
   }
   err:

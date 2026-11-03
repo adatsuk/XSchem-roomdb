@@ -37,7 +37,7 @@ static void merge_text(FILE *fd)
        &xctx->text[i].x0, &xctx->text[i].y0, &xctx->text[i].rot,
        &xctx->text[i].flip, &xctx->text[i].xscale,
        &xctx->text[i].yscale) <6) {
-         fprintf(errfp,"merge_text(): WARNING:  missing fields for TEXT object, ignoring\n");
+         info("merge_text(): WARNING:  missing fields for TEXT object, ignoring\n");
          read_line(fd, 0);
          return;
      }
@@ -59,7 +59,7 @@ static void merge_wire(FILE *fd)
     char *ptr=NULL;
     i=xctx->wires;
     if(fscanf(fd, "%lf %lf %lf %lf",&x1, &y1, &x2, &y2 ) < 4) {
-      fprintf(errfp,"merge_wire(): WARNING:  missing fields for WIRE object, ignoring\n");
+      info("merge_wire(): WARNING:  missing fields for WIRE object, ignoring\n");
       read_line(fd, 0);
       return;
     }
@@ -77,7 +77,7 @@ static void merge_box(FILE *fd)
 
     n = fscanf(fd, "%d",&c);
     if(n != 1 || c < 0 || c >= cadlayers) {
-      fprintf(errfp,"merge_arc(): WARNING: wrong or missing layer number for xRECT object, ignoring.\n");
+      info("merge_arc(): WARNING: wrong or missing layer number for xRECT object, ignoring.\n");
       read_line(fd, 0);
       return;
     }
@@ -86,7 +86,7 @@ static void merge_box(FILE *fd)
     ptr=xctx->rect[c];
     if(fscanf(fd, "%lf %lf %lf %lf ",&ptr[i].x1, &ptr[i].y1,
        &ptr[i].x2, &ptr[i].y2) < 4) {
-      fprintf(errfp,"merge_arc(): WARNING:  missing fields for xRECT object, ignoring\n");
+      info("merge_arc(): WARNING:  missing fields for xRECT object, ignoring\n");
       read_line(fd, 0);
       return;
     }
@@ -139,7 +139,7 @@ static void merge_arc(FILE *fd)
 
     n = fscanf(fd, "%d",&c);
     if(n != 1 || c < 0 || c >= cadlayers) {
-      fprintf(errfp,"merge_arc(): WARNING: wrong or missing layer number for ARC object, ignoring.\n");
+      info("merge_arc(): WARNING: wrong or missing layer number for ARC object, ignoring.\n");
       read_line(fd, 0);
       return;
     }
@@ -148,7 +148,7 @@ static void merge_arc(FILE *fd)
     ptr=xctx->arc[c];
     if(fscanf(fd, "%lf %lf %lf %lf %lf ",&ptr[i].x, &ptr[i].y,
            &ptr[i].r, &ptr[i].a, &ptr[i].b) < 5) {
-      fprintf(errfp,"merge_arc(): WARNING:  missing fields for ARC object, ignoring\n");
+      info("merge_arc(): WARNING:  missing fields for ARC object, ignoring\n");
       read_line(fd, 0);
       return;
     }
@@ -184,12 +184,12 @@ static void merge_polygon(FILE *fd)
     const char *dash;
 
     if(fscanf(fd, "%d %d",&c, &points)<2) {
-      fprintf(errfp,"merge_polygon(): WARNING: missing fields for POLYGON object, ignoring.\n");
+      info("merge_polygon(): WARNING: missing fields for POLYGON object, ignoring.\n");
       read_line(fd, 0);
       return;
     }
     if(c < 0 || c>=cadlayers) {
-      fprintf(errfp,"merge_polygon(): Rectangle layer > defined cadlayers, increase cadlayers\n");
+      info("merge_polygon(): Rectangle layer > defined cadlayers, increase cadlayers\n");
       read_line(fd, 0);
       return;
     }
@@ -207,7 +207,7 @@ static void merge_polygon(FILE *fd)
     ptr[i].sel=0;
     for(j=0;j<points; ++j) {
       if(fscanf(fd, "%lf %lf ",&(ptr[i].x[j]), &(ptr[i].y[j]))<2) {
-        fprintf(errfp,"merge_polygon(): WARNING: missing fields for POLYGON points, ignoring.\n");
+        info("merge_polygon(): WARNING: missing fields for POLYGON points, ignoring.\n");
         my_free(_ALLOC_ID_, &ptr[i].x);
         my_free(_ALLOC_ID_, &ptr[i].y);
         my_free(_ALLOC_ID_, &ptr[i].selected_point);
@@ -243,7 +243,7 @@ static void merge_line(FILE *fd)
 
     n = fscanf(fd, "%d",&c);
     if(n != 1 || c < 0 || c >= cadlayers) {
-      fprintf(errfp,"merge_line(): WARNING: Wrong or missing layer number for LINE object, ignoring\n");
+      info("merge_line(): WARNING: Wrong or missing layer number for LINE object, ignoring\n");
       read_line(fd, 0);
       return;
     }
@@ -251,7 +251,7 @@ static void merge_line(FILE *fd)
     i=xctx->lines[c];
     ptr=xctx->line[c];
     if(fscanf(fd, "%lf %lf %lf %lf ",&ptr[i].x1, &ptr[i].y1, &ptr[i].x2, &ptr[i].y2) < 4) {
-      fprintf(errfp,"merge_line(): WARNING:  missing fields for LINE object, ignoring\n");
+      info("merge_line(): WARNING:  missing fields for LINE object, ignoring\n");
       read_line(fd, 0);
       return;
     }
@@ -289,7 +289,7 @@ static void merge_inst(int k,FILE *fd)
     #endif
     my_free(_ALLOC_ID_, &tmp);
     if(fscanf(fd, "%lf %lf %hd %hd",&xctx->inst[i].x0, &xctx->inst[i].y0,&xctx->inst[i].rot, &xctx->inst[i].flip) < 4) {
-      fprintf(errfp,"WARNING: missing fields for INSTANCE object, ignoring.\n");
+      info("WARNING: missing fields for INSTANCE object, ignoring.\n");
       read_line(fd, 0);
       return;
     }
@@ -352,7 +352,7 @@ void merge_file(int selection_load, const char ext[])
        my_strncpy(filename, ext, S(filename));
        name = filename;
      }
-     dbg(1, "merge_file(): sch=%d name=%s\n",xctx->currsch,name);
+     dbg(1, ("merge_file(): sch=%d name=%s\n",xctx->currsch,name));
     }
     else if(selection_load==1)
     {
@@ -383,7 +383,7 @@ void merge_file(int selection_load, const char ext[])
      xctx->prep_hash_inst=0;
      xctx->prep_hash_wires=0;
      got_mouse = 0;
-     xctx->push_undo();
+     xctx->push_undo(0);
      unselect_all(1);
      old=xctx->instances;
      while(!endfile)
@@ -462,8 +462,8 @@ void merge_file(int selection_load, const char ext[])
      else fclose(fd);
 
      xctx->ui_state |= STARTMERGE;
-     dbg(1, "End merge_file(): loaded file %s: wire=%d inst=%d ui_state=%ld\n",
-             name, xctx->wires , xctx->instances, xctx->ui_state);
+     dbg(1, ("End merge_file(): loaded file %s: wire=%d inst=%d ui_state=%ld\n",
+             name, xctx->wires , xctx->instances, xctx->ui_state));
      move_objects(START,0,0,0);
      if(xctx->lastsel) {
        xctx->mousex_snap = xctx->mx_double_save;
@@ -471,7 +471,7 @@ void merge_file(int selection_load, const char ext[])
        if(rubber) move_objects(RUBBER,0,0,0);
      }
     } else {
-      dbg(0, "merge_file(): can not open %s\n", name);
+      info("merge_file(): can not open %s\n", name);
       xctx->paste_from = 0;
     }
     set_modify(1);
