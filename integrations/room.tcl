@@ -610,21 +610,95 @@ proc room_fit_graphs {} {
   catch {xschem redraw}
 }
 
+# Infer preferred raw type from the netlist control block (tran vs ac/sp).
+proc room_preferred_raw_type {simdir} {
+  set nf ""
+  catch {
+    set sch [xschem get schname]
+    if {$sch ne ""} {
+      set nf [file join $simdir [file rootname [file tail $sch]].spice]
+    }
+  }
+  if {$nf eq "" || ![file exists $nf]} {
+    foreach cand [glob -nocomplain -directory $simdir *.spice] {
+      set nf $cand
+      break
+    }
+  }
+  if {$nf eq "" || ![file exists $nf]} {
+    return ""
+  }
+  if {[catch {set fh [open $nf r]}]} {
+    return ""
+  }
+  set body [read $fh]
+  close $fh
+  # Prefer the last analysis request in .control (matches what write usually captures).
+  set last ""
+  foreach line [split $body "\n"] {
+    if {[regexp -nocase {^[[:space:]]*tran[[:space:]]} $line]} {
+      set last tran
+    } elseif {[regexp -nocase {^[[:space:]]*(ac|sp)[[:space:]]} $line]} {
+      set last ac
+    }
+  }
+  return $last
+}
+
 # ngspice "SP Analysis" is loaded by xschem as sim_type=ac (see save.c Plotname match).
 # Passing "sp" skips the dataset → empty graph + file picker for schname.raw.
+#
+# Shared XSCHEM_NETLIST_DIR often keeps leftover *_sp.raw from other cells. Loading
+# that first (old code) fits graphs to GHz AC axes and leaves Tran empty.
 proc room_load_sim_raw {simdir} {
   if {$simdir eq "" || ![file isdirectory $simdir]} {
     return 0
   }
-  set candidates [concat \
-    [lsort -dictionary [glob -nocomplain -directory $simdir *_sp.raw]] \
-    [lsort -dictionary [glob -nocomplain -directory $simdir *.raw]]]
+  set prefer [room_preferred_raw_type $simdir]
+  set all [glob -nocomplain -directory $simdir *.raw]
+  # Newest first — the file just written by ngspice wins over stale leftovers.
+  set stamped {}
+  foreach raw $all {
+    lappend stamped [list [file mtime $raw] $raw]
+  }
+  set stamped [lsort -integer -decreasing -index 0 $stamped]
+  set candidates {}
+  foreach row $stamped {
+    lappend candidates [lindex $row 1]
+  }
+
+  # Soft preference filter (still fall back to the full list).
+  set ordered {}
   foreach raw $candidates {
     if {![file exists $raw] || [file size $raw] < 100} {
       continue
     }
-    # Try ac first (SP/AC), then bare read, then tran.
-    foreach typ {ac {} tran} {
+    set base [string tolower [file tail $raw]]
+    if {$prefer eq "tran" && [string match "*_sp.raw" $base]} {
+      continue
+    }
+    if {$prefer eq "ac" && ![string match "*_sp.raw" $base] && ![string match "*ac*" $base] && ![string match "*sp*" $base]} {
+      # keep non-sp for later fallback
+      continue
+    }
+    lappend ordered $raw
+  }
+  foreach raw $candidates {
+    if {[lsearch -exact $ordered $raw] < 0 && [file exists $raw] && [file size $raw] >= 100} {
+      lappend ordered $raw
+    }
+  }
+
+  if {$prefer eq "tran"} {
+    set typ_order {tran {} ac}
+  } elseif {$prefer eq "ac"} {
+    set typ_order {ac {} tran}
+  } else {
+    set typ_order {{} tran ac}
+  }
+
+  foreach raw $ordered {
+    foreach typ $typ_order {
       set ok 0
       if {$typ eq ""} {
         set ok [expr {![catch {xschem raw_read $raw}]}]
@@ -632,13 +706,13 @@ proc room_load_sim_raw {simdir} {
         set ok [expr {![catch {xschem raw_read $raw $typ}]}]
       }
       if {$ok} {
-        room_log_launch "raw_read ok ([expr {$typ eq {} ? {auto} : $typ}]): $raw"
+        room_log_launch "raw_read ok ([expr {$typ eq {} ? {auto} : $typ}] prefer=$prefer): $raw"
         room_fit_graphs
         return 1
       }
     }
   }
-  room_log_launch "raw_read failed in $simdir"
+  room_log_launch "raw_read failed in $simdir (prefer=$prefer)"
   return 0
 }
 
@@ -1761,13 +1835,24 @@ proc room_build_symbol_index {{force 0}} {
       isource_arith { set aliases [list Iarith] }
       default { set aliases {} }
     }
+    # Aliases fill gaps only — never overwrite a real ROOM (e.g. analogLib/Port.symbol.room
+    # must win over opin→Port alias, or materialize writes opin.sym and batch netlist
+    # fails with "Symbol not found: analogLib/Port.sym").
     foreach alias $aliases {
-      room_register_symbol_key "$alias.sym" $roompath
+      foreach key [list "$alias.sym"] {
+        if {![info exists ::room_symbol_index($key)]} {
+          room_register_symbol_key $key $roompath
+        }
+      }
       if {$techlib ne ""} {
         foreach tlib [split $techlib {;}] {
           set tlib [string trim $tlib]
-          if {$tlib ne ""} {
-            room_register_symbol_key "$tlib/$alias.sym" $roompath
+          if {$tlib eq ""} {
+            continue
+          }
+          set key "$tlib/$alias.sym"
+          if {![info exists ::room_symbol_index($key)]} {
+            room_register_symbol_key $key $roompath
           }
         }
       }
@@ -1928,6 +2013,18 @@ proc room_materialize_symbol {symref} {
         if {$localspice ne $spice} {
           catch {file copy -force $spice $localspice}
         }
+      }
+    }
+  }
+  # Requested name may differ from exported cell (alias Port → opin). Batch
+  # netlist has no find_file hooks and needs analogLib/Port.sym on disk.
+  set req_tail [file tail $symref]
+  if {$req_tail ne "" && $req_tail ne "$cell.sym"} {
+    set sym_as_req [file join $outdir $req_tail]
+    if {$sym_as_req ne $sym && [file exists $sym]} {
+      catch {file copy -force $sym $sym_as_req}
+      if {[file exists $sym_as_req]} {
+        set sym $sym_as_req
       }
     }
   }

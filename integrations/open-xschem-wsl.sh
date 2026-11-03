@@ -176,7 +176,7 @@ sync_xschem_native_tree() {
           room.tcl)
             # Bump this token when LibMan-critical room.tcl behavior changes so the
             # warm cache picks up the Windows tree without FORCE_XSCHEM_TREE_SYNC.
-            grep -q 'load_args.*-nodraw' "$dst" 2>/dev/null && return 0
+            grep -q 'never overwrite a real ROOM' "$dst" 2>/dev/null && return 0
             ;;
           *.sh|*.tcl|*.rc) return 0 ;;
         esac
