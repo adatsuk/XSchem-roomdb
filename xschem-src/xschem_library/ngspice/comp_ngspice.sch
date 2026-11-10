@@ -1,4 +1,4 @@
-v {xschem version=3.4.6 file_version=1.2
+v {xschem version=3.4.8RC file_version=1.3
 *
 * This file is part of XSCHEM,
 * a schematic capture and Spice/Vhdl/Verilog netlisting tool for circuit
@@ -23,6 +23,7 @@ G {}
 K {}
 V {}
 S {}
+F {}
 E {}
 B 2 520 -415 630 -315 {name=l4
 flags=graph,unlocked
@@ -61,3 +62,33 @@ C {vsource.sym} 150 -210 1 0 {name=V2 value=0}
 C {scope_ammeter.sym} 500 -290 0 0 {name=l4
 attach=l4
 device=R1}
+C {launcher.sym} 580 -100 0 0 {name=h6
+descr="Run top level sim, reload annotation data" 
+tclcommand="
+proc netlist_top \{\} \{
+  global sim netlist_dir
+
+  ## set foreground spice simulation
+  set_sim_defaults ;# populate sim() array
+  set sim(spice,0,fg) 1
+
+  set parent_level [expr \{[xschem get currsch] - 1\}]
+
+  ## get instance name of parent instance we descended into:
+  set instname [xschem hier_attr $parent_level name]
+
+  ## go up one level
+  xschem go_back 
+
+  ## netlist, simulate, load simulation data 
+  xschem netlist
+  xschem simulate
+  xschem raw_read $netlist_dir/[file rootname [file tail [xschem get current_name]]].raw tran
+
+  ## descend again
+  xschem descend 1 1 $instname
+\}
+netlist_top
+"
+
+}

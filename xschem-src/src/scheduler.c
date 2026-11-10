@@ -898,19 +898,36 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
       delete_files();
     }
 
-    /* descend [n] [notitle]
+    /* descend [n] [set_title] [instname]
      *   Descend into selected component instance. Optional number 'n' specifies the
      *   instance number to descend into for vector instances (default: 0).
-     *   0 or 1: leftmost instance, 2: second leftmost instance, ...
+     *   0: pop a dialog box and ask to user which inst number to descend into
+     *   1: leftmost instance, 2: second leftmost instance, ...
      *  -1: rightmost instance,-2: second rightmost instance, ...
-     *  if integer 'notitle' is given pass it to descend_schematic() */
+     *  if integer 'set_title' is given pass it to descend_schematic(), default : 1
+     *              == 0 do not set window title (faster)
+     *              == 1 do set title
+     *              == 2 do not process instance pins/nets
+     *              == 4 do not descend into i-th instance of vector instance. just
+     *                 concatenate instance name as is to path and descend.
+     *  if instname (name or number) is given select and descend into specified instance name */
     else if(!strcmp(argv[1], "descend"))
     {
+      int inst = -1;
       int ret=0;
       int set_title = 1;
       if(!xctx) {Tcl_SetResult(interp, not_avail, TCL_STATIC); return TCL_ERROR;}
       if(xctx->semaphore == 0) {
 
+        if(argc > 4 ) {
+          inst = get_instance(argv[4]);
+          if(inst >= 0) {
+            unselect_all(0);
+            select_element(inst, SELECTED, 3, 1);
+            xctx->ui_state |= SELECTION;
+            rebuild_selected_array();
+          }
+        }
         if(argc > 3 ) {
           set_title = atoi(argv[3]);
         }
@@ -2512,16 +2529,55 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
     {
       xschem_cmd_help(argc, argv);
     }
-    /* hier_attr
-     *   Debug command */
+    /* hier_attr [level] [attr]
+     *   return attribute string of parent instance when we are descended into a lower level.
+     *   valid values for 'level' are from 0 to current level - 1 (top level is level 0) 
+     *   if 'level' not given or set to -1 return all parent level attributes
+     *   if 'attr' is given return value of attribute 'attr' within attribute string
+     *   example: if we are in level 2 and want to get instance name of parent instance:
+     *     % xschem hier_attr 1 name
+     *     % x2
+     */
     else if(!strcmp(argv[1], "hier_attr")) {
       int k;
       char s[500];
+      const char *attr = NULL;
+      int level = -1; /* show all previous levels */
       if(!xctx) {Tcl_SetResult(interp, not_avail, TCL_STATIC); return TCL_ERROR;}
-      for(k = xctx->currsch; k >= 0; k--) {
-        if(xctx->hier_attr[k].prop_ptr) {
-          my_snprintf(s, S(s), "\nlevel=%d, attr=\n%s\n", k, xctx->hier_attr[k].prop_ptr);
-          Tcl_AppendResult(interp, s, NULL);
+
+      if(argc > 3) attr = argv[3];
+      if(argc > 2) {
+        level = atoi(argv[2]);
+        if(level < 0 || level >= xctx->currsch) level = -2; /* -2 : don't show anything */
+      }
+      if(level == -1) {
+        for(k = xctx->currsch - 1; k >= 0; k--) {
+          if(xctx->hier_attr[k].prop_ptr) {
+            if(attr) {
+              if(!strcmp(attr, "inst_number")) {
+                my_snprintf(s, S(s), "\nlevel=%d, inst_number=\n%d\n", k, xctx->sch_inst_number[k]);
+              } else {
+                my_snprintf(s, S(s), "\nlevel=%d, prop=\n%s\n", k, 
+                  get_tok_value(xctx->hier_attr[k].prop_ptr, attr, 0));
+              }
+            } else {
+              my_snprintf(s, S(s), "\nlevel=%d, prop=\n%s\n", k, xctx->hier_attr[k].prop_ptr);
+            }
+            Tcl_AppendResult(interp, s, NULL);
+          }
+        }
+      } else if(level != -2) {
+        if(xctx->hier_attr[level].prop_ptr) {
+          if(attr) {
+            if(!strcmp(attr, "inst_number")) {
+              Tcl_SetResult(interp, my_itoa(xctx->sch_inst_number[level]), TCL_VOLATILE);
+            } else {
+              Tcl_SetResult(interp, (char *)get_tok_value(
+                    xctx->hier_attr[level].prop_ptr, attr, 0), TCL_VOLATILE);
+            }
+          } else {
+            Tcl_SetResult(interp, xctx->hier_attr[level].prop_ptr, TCL_VOLATILE);
+          }
         }
       }
     }
@@ -3208,6 +3264,11 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
      *   '-gui': ask to save modified file or warn if opening an already
      *       open file or opening a new(not existing) file.
      *   '-noundoreset': do not reset the undo history
+     *   '-nosettitle': will not update window / tab title and modified flag
+     *   '-notimestamp': will not get file timestamp information
+     *   '-nosetnetlistdir': will not change / set netlist_dir and netlist_type information
+     *   '-notrimwires': will not trim wires even if autotrim_wires is enabled
+     *   '-fast': -notrimwires, -nosetnetlistdir, -notimestamp, -nosettitle, -noundoreset combined
      *   '-lastclosed': open last closed file
      *   '-lastopened': open last opened file
      *   '-nosymbols': do not load symbols (used if loading a symbol instead of
@@ -3218,7 +3279,7 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
      */
     else if(!strcmp(argv[1], "load") )
     {
-      int load_symbols = 1, force = 1, undo_reset = 1, nofullzoom = 0, nodraw = 0;
+      int load_symbols = 1, force = 1, reset_undo = 1, nofullzoom = 0, nodraw = 0;
       int keep_symbols = tclgetboolvar("keep_symbols");
       int first;
       int lastclosed = 0, lastopened = 0;
@@ -3237,7 +3298,18 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
           } else if(!strcmp(argv[i], "-lastopened")) {
             lastopened = 1;
           } else if(!strcmp(argv[i], "-noundoreset")) {
-            undo_reset = 0;
+            reset_undo &= ~(0x1); 
+          } else if(!strcmp(argv[i], "-nosettitle")) {
+            reset_undo |= (0x2); 
+          } else if(!strcmp(argv[i], "-notimestamp")) {
+            reset_undo |= (0x4); 
+          } else if(!strcmp(argv[i], "-nosetnetlistdir")) {
+            reset_undo |= (0x16); 
+          } else if(!strcmp(argv[i], "-notrimwires")) {
+            reset_undo |= (0x8); 
+          } else if(!strcmp(argv[i], "-fast")) {
+            reset_undo &= ~(0x1); 
+            reset_undo |= (0x1e); 
           } else if(!strcmp(argv[i], "-nofullzoom")) {
             nofullzoom = 1;
           } else if(!strcmp(argv[i], "-nodraw")) {
@@ -3278,7 +3350,8 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
         }
         if(force || !has_x || !xctx->modified  || save(1, 0) != -1 ) { /* save(1)==-1 --> user cancel */
           int skip = 0, res = 1;
-          if(tclgetboolvar("preserve_undo")) { /* ask to save modified hierarchy schematics not displayed */
+          /* ask to save modified hierarchy schematics not displayed */
+          if((reset_undo & 1) && tclgetboolvar("preserve_undo")) {
             res = save_undo_table(NULL, NULL, XASK_SAVE);
           }
           if(res == 0) skip = 1;
@@ -3300,12 +3373,19 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
           if(!skip) {
             int ret;
             (void) ret;
+
+            if(!first_loaded) {
+              if(!(reset_undo & 1) && tclgetboolvar("preserve_undo")) {
+                xctx->push_undo(2);
+              } 
+            }
+
             clear_all_hilights();
             unselect_all(1);
             /* no implicit undo: if needed do it before loading */
-            /* if(!undo_reset) xctx->push_undo(0); */
+            /* if(!reset_undo) xctx->push_undo(0); */
             if(!first_loaded) {
-              if(undo_reset) xctx->currsch = 0;
+              if(reset_undo & 1) xctx->currsch = 0;
               if(!keep_symbols) remove_symbols();
               if(!nofullzoom) {
                 xctx->zoom=CADINITIALZOOM;
@@ -3314,19 +3394,26 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
                 xctx->yorigin=CADINITIALY;
               }
             }
-            dbg(1, ("scheduler: undo_reset=%d\n", undo_reset));
+            dbg(1, ("scheduler: reset_undo=%d\n", reset_undo));
 
             if(first_loaded) {
               int dr = nofullzoom * 2 + !nodraw;
               ret = new_schematic("create", "noconfirm", f, dr);
-              if(undo_reset) {
+              if(reset_undo & 1) {
                 tclvareval("update_recent_file {", f, "}", NULL);
               }
             } else {
               first_loaded = 1;
-              ret = load_schematic(load_symbols, f, undo_reset, !force);
+
+              ret = load_schematic(load_symbols, f, reset_undo, !force);
+
+              if(!(reset_undo & 1) && tclgetboolvar("preserve_undo")) {
+                save_undo_table(xctx->current_name, NULL, XGET); /* sets xctx->undo_initialized = 0 if not found */
+                xctx->pop_undo(2, 0);
+              }
+
               dbg(1, ("xschem load: f=%s, ret=%d\n", f, ret));
-              if(undo_reset) {
+              if(reset_undo & 1) {
                 tclvareval("update_recent_file {", f, "}", NULL);
                 my_strdup(_ALLOC_ID_, &xctx->sch_path[xctx->currsch], ".");
                 if(xctx->portmap[xctx->currsch].table) str_hash_free(&xctx->portmap[xctx->currsch]);
@@ -6742,7 +6829,7 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
         }
       }
       else if(argc > 3 && atoi(argv[2]) == 11) {
-         load_schematic(1, argv[3], 0, 0);
+         load_schematic(1, argv[3], 0x1e, 0);
       }
     }
 

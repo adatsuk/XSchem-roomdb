@@ -2627,6 +2627,7 @@ int change_sch_path(int instnumber, int dr)
 }
 
 /* fallback = 1: if schematic=.. attr is set but file not existing descend into symbol base schematic
+ * fallback = 2: same as above, without asking user confirm.
  * instnumber: instance to descend into in case of vector instances (1 = leftmost, -1=rightmost,
  *             0 = ask user)
  * if set_title == 0 do not set window title (faster)
@@ -2825,6 +2826,7 @@ int descend_schematic(int instnumber, int fallback, int alert, int set_title)
 
    /* set other information needed to get back correctly later on */
    xctx->previous_instance[xctx->currsch]=n;
+   xctx->zoom_array[xctx->currsch].schname_hash = str_hash(xctx->current_name);
    xctx->zoom_array[xctx->currsch].x=xctx->xorigin;
    xctx->zoom_array[xctx->currsch].y=xctx->yorigin;
    xctx->zoom_array[xctx->currsch].zoom=xctx->zoom;
@@ -2833,7 +2835,7 @@ int descend_schematic(int instnumber, int fallback, int alert, int set_title)
    unselect_all(1);
    dbg(1, ("descend_schematic(): filename=%s\n", filename));
    if(!tclgetboolvar("keep_symbols")) remove_symbols();
-   descend_ok = load_schematic(1, filename, (set_title & 1), alert);
+   descend_ok = load_schematic(1, filename, (set_title ? 1 : 0x1e), alert);
    if(descend_ok) {
 
      if(tclgetboolvar("preserve_undo")) {
@@ -2857,7 +2859,17 @@ int descend_schematic(int instnumber, int fallback, int alert, int set_title)
        }
      }
    }
-   zoom_full(1, 0, 1 + 2 * tclgetboolvar("zoom_full_center"), 0.97);
+
+   if(xctx->zoom_array[xctx->currsch].schname_hash == str_hash(xctx->current_name)) {
+     xctx->xorigin=xctx->zoom_array[xctx->currsch].x;
+     xctx->yorigin=xctx->zoom_array[xctx->currsch].y;
+     xctx->zoom=xctx->zoom_array[xctx->currsch].zoom;
+     xctx->mooz=1/xctx->zoom;
+     change_linewidth(-1.);
+     draw();
+   } else {
+     zoom_full(1, 0, 1 + 2 * tclgetboolvar("zoom_full_center"), 0.97);
+   }
  }
  return descend_ok;
 }
@@ -2968,13 +2980,19 @@ void go_back(int what)
   if(xctx->portmap[xctx->currsch].table) str_hash_free(&xctx->portmap[xctx->currsch]);
 
   xctx->sch_path_hash[xctx->currsch] = 0;
+
+  xctx->zoom_array[xctx->currsch].schname_hash = str_hash(xctx->current_name);
+  xctx->zoom_array[xctx->currsch].x = xctx->xorigin;
+  xctx->zoom_array[xctx->currsch].y = xctx->yorigin;
+  xctx->zoom_array[xctx->currsch].zoom = xctx->zoom;
+
   xctx->currsch--;
   save_modified = xctx->modified; /* we propagate modified flag (cleared by load_schematic */
                             /* by default) to parent schematic if going back from embedded symbol */
 
   my_strncpy(filename, xctx->sch[xctx->currsch], S(filename));
   
-  load_schematic(1, filename, set_title, 1);
+  load_schematic(1, filename, set_title ? 1 : 0x1e, 1);
   /* if we are returning from a symbol created from a generator don't set modified flag on parent
    * as these symbols can not be edited / saved as embedded
    * xctx->sch_inst_number[xctx->currsch] == -1 --> we came from an inst with no embed flag set */
