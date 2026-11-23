@@ -577,6 +577,9 @@ typedef struct
 typedef struct
 {
   char *name;
+#ifdef XSCHEM_HAS_ROOM
+  int room_verified; /* exact standard definition loaded from disk */
+#endif
   const char *base_name; /* points to the base symbol name this symbol is inherited from
                           * (schematic attribute set on instances, create "virtual" symbol) */
   double minx;

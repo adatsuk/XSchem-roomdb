@@ -70,11 +70,22 @@ parselabel.o: expandlabel.h
 
 $(OBJ): xschem.h ../config.h Makefile
 ifeq ($(origin ROOM_PREFIX),command line)
-save.o: room_direct.inc
+save.o: room_direct.inc room_standard_symbols.h
+
+# Embed the shipped standards independently of the runtime library search path.
+room_standard_symbols.h: $(addprefix ../xschem_library/devices/,$(addsuffix .sym,res capa ind))
+	@set -e; for file in $^; do \
+	  name=$${file##*/}; \
+	  bytes=$$(od -An -v -t u1 "$$file"); \
+	  printf 'static const unsigned char room_%s[] = {\n' "$${name%.sym}"; \
+	  printf '%s\n' "$$bytes" | awk '{ for (i=1; i<=NF; i++) printf "%s,", $$i; print "" }'; \
+	  printf '};\n'; \
+	done > $@.tmp
+	mv $@.tmp $@
 endif
 
 clean: FORCE
-	rm -rf rawtovcd xschem *.o eval_expr.c expandlabel.[ch] parselabel.c
+	rm -rf rawtovcd xschem *.o eval_expr.c expandlabel.[ch] parselabel.c room_standard_symbols.h
 
 # Explicit rule for each object:
 &]

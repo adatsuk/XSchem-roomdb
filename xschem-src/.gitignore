@@ -41,3 +41,4 @@ doc/manpages/xschem.1
 Makefile.conf
 config.h
 *.Identifier
+/src/room_standard_symbols.h

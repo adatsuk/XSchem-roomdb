@@ -2027,6 +2027,9 @@ void copy_symbol_from_uslot(int i, xSymbol *dest_sym, const char *name, Undo_slo
 {
     int c, j;
 
+#ifdef XSCHEM_HAS_ROOM
+    dest_sym->room_verified = 0; /* symbol editor undo slot */
+#endif
     dbg(1, ("%s: fetched from uslot[0] ...\n",name));
     dest_sym->texts = uslot.texts;
     dest_sym->name = NULL;
@@ -2131,6 +2134,9 @@ void copy_symbol(int i, xSymbol *dest_sym, xSymbol *src_sym)
     dest_sym->miny = src_sym->miny;
     dest_sym->maxy = src_sym->maxy;
     dest_sym->flags = src_sym->flags;
+#ifdef XSCHEM_HAS_ROOM
+    dest_sym->room_verified = src_sym->room_verified;
+#endif
     dest_sym->texts = src_sym->texts;
   
     dest_sym->name = NULL;
@@ -2396,6 +2402,9 @@ void get_additional_symbols(int what)
           symptr = xctx->inst[i].ptr + xctx->sym;
 
           copy_symbol(j, &xctx->sym[j], symptr);
+#ifdef XSCHEM_HAS_ROOM
+          xctx->sym[j].room_verified = 0; /* derived netlist symbol */
+#endif
           xctx->sym[j].base_name = symptr->name;
           my_strdup(_ALLOC_ID_, &xctx->sym[j].name, sym);
 

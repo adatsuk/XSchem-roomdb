@@ -6199,6 +6199,9 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
           return TCL_ERROR;
         }
         sym = &xctx->sym[i];
+#ifdef XSCHEM_HAS_ROOM
+        sym->room_verified = 0;
+#endif
         if(argc > 5)
           my_strdup2(_ALLOC_ID_, &sym->prop_ptr, subst_token(sym->prop_ptr, argv[4], argv[5]));
         else

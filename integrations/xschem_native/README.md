@@ -4,6 +4,8 @@ A ROOM-enabled editor opens a flat binary `.room` schematic directly in
 memory. Open it from the file dialog, the command line or `xschem load`.
 You can save an existing `value` on the standard resistor, capacitor and
 inductor symbols (`res.sym`, `capa.sym`, `ind.sym`, with or without `devices/`).
+The loaded file must match the shipped definition embedded in the editor
+at build time. Local overrides with different bytes are read-only.
 Other attribute changes, structural changes, Save As and new ROOM files
 are refused. Quote values with literal backslashes or double quotes and
 escape those characters inside the quotes. A refused save leaves
@@ -50,11 +52,14 @@ failed Open, Save As, carriage returns and stale files with scripts
 disabled. Observe filesystem writes to distinguish Xschem's undo
 snapshots from a schematic working copy.
 
-`minimal-regressions.tcl` checks the save scope, unquoted escape refusal
-and high-precision arc undo. Run it in a fresh process per case with a
-disposable `REVIEW_FILE`, `REVIEW_CASE` set to `scope`, `escape` or `precision`,
-and `REVIEW_UNDO` set to `disk` or `memory` for `precision`. The fixture and
-invocation details are in the implementation handoff `FIXES.md`.
+`minimal-regressions.tcl` checks the save scope, unquoted escape refusal,
+high-precision arc undo and symbol shadows. Run it in a fresh process per
+case with a disposable `REVIEW_FILE` and `REVIEW_CASE` set to `scope`,
+`escape`, `precision`, `shadow-bare` or `shadow-devices`. For `precision`,
+set `REVIEW_UNDO` to `disk` or `memory`. For the shadow cases, load R1 with
+the matching bare or `devices/` reference from a custom resistor definition
+whose SPICE format includes `CUSTOM_MARKER`. The fixture and invocation
+details are in the implementation handoff `FIXES.md`.
 
 Use a separate copy for the ordinary build and omit `ROOM_PREFIX`.
 The makefile accepts `ROOM_PREFIX` only from the make command line.

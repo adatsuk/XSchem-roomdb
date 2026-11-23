@@ -20,6 +20,9 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#if defined(XSCHEM_HAS_ROOM) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE /* fmemopen */
+#endif
 #include "xschem.h"
 #ifdef __unix__
 #include <sys/wait.h>  /* waitpid */
@@ -5057,6 +5060,9 @@ int load_sym_def(const char *name, FILE *embed_fd, FILE *read_from)
   check_symbol_storage();
   symbol = xctx->sym;
   symbols = xctx->symbols;
+#ifdef XSCHEM_HAS_ROOM
+  symbol[symbols].room_verified = 0;
+#endif
   dbg(1, ("l_s_d(): recursion_counter=%d, name=%s read_from=%p\n", recursion_counter, name, read_from));
   recursion_counter++;
   lcc=NULL;
@@ -5081,7 +5087,18 @@ int load_sym_def(const char *name, FILE *embed_fd, FILE *read_from)
     } else {
       my_strncpy(sympath, abs_sym_path(transl_name, ""), S(sympath));
     }
-    if((lcc[level].fd=my_fopen(sympath,fopen_read_mode))==NULL) {
+    lcc[level].fd = my_fopen(sympath, fopen_read_mode);
+#ifdef XSCHEM_HAS_ROOM
+    if(xctx->room_document && lcc[level].fd) {
+      FILE *verified = room_verified_symbol(lcc[level].fd, transl_name);
+      if(verified) {
+        fclose(lcc[level].fd);
+        lcc[level].fd = verified;
+        symbol[symbols].room_verified = 1;
+      }
+    }
+#endif
+    if(!lcc[level].fd) {
       /* not found: try web URL */
       if(is_from_web(xctx->current_dirname)) {
         my_snprintf(sympath, S(sympath), "%s/%s", xschem_web_dirname, get_cell_w_ext(transl_name, 0));

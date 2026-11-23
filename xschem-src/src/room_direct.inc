@@ -1,5 +1,6 @@
 /* Native ROOM document support, compiled only for ROOM-enabled builds. */
 #include <room_xschem.h>
+#include "room_standard_symbols.h"
 
 /* Initialize editor objects directly, with the same cached flags as the text loader. */
 static short room_dash(const char *attributes)
@@ -141,6 +142,40 @@ static rx_string room_string(const char *s)
 {
   rx_string value = {s ? s : "", s ? strlen(s) : 0};
   return value;
+}
+
+/* Verify the exact opened file and parse the matching bytes from memory. */
+static FILE *room_verified_symbol(FILE *opened, const char *name)
+{
+  const unsigned char *standard;
+  size_t size;
+  struct stat st;
+  int fd = fileno(opened);
+  if(!strncmp(name, "devices/", 8)) name += 8;
+  if(!strcmp(name, "res.sym")) {
+    standard = room_res;
+    size = sizeof(room_res);
+  } else if(!strcmp(name, "capa.sym")) {
+    standard = room_capa;
+    size = sizeof(room_capa);
+  } else if(!strcmp(name, "ind.sym")) {
+    standard = room_ind;
+    size = sizeof(room_ind);
+  } else return NULL;
+
+  if(fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size != (off_t)size) return NULL;
+  unsigned char actual[size + 1];
+  if(pread(fd, actual, sizeof(actual), 0) != (ssize_t)size || memcmp(actual, standard, size))
+    return NULL;
+  return fmemopen((void *)standard, size, "r");
+}
+
+/* A linked, unmodified disk symbol must match the instance's reference. */
+static int room_instance_verified(const xInstance *inst)
+{
+  if(inst->ptr < 0 || inst->ptr >= xctx->symbols) return 0;
+  const xSymbol *sym = &xctx->sym[inst->ptr];
+  return sym->room_verified && !(sym->flags & EMBEDDED) && !strcmp(inst->name, sym->name);
 }
 
 /* Use the same escaping as save_ascii_string, without a document text stream. */
@@ -313,12 +348,13 @@ static int room_load(const char *path, int load_symbols, int reset_undo)
 
 /* Capture only typed objects from xctx. Errors leave the document and dirty flag intact. */
 static int room_emit(char kind, int layer, int rotation, int flip, const double *v, size_t n,
-                     const char *text, const char *attributes)
+                     const char *text, const char *attributes, int verified)
 {
   rx_error *error = NULL;
   char *t = room_encode(text), *a = room_encode(attributes);
   rx_record r = {kind, layer, rotation, flip, v, n, room_string(t), room_string(a)};
-  int ok = rx_append(xctx->room_document, &r, &error);
+  int ok = verified ? rx_append_verified_instance(xctx->room_document, &r, &error)
+                    : rx_append(xctx->room_document, &r, &error);
   my_free(_ALLOC_ID_, &t); my_free(_ALLOC_ID_, &a);
   return ok ? 1 : room_failure(error, "Cannot stage ROOM object");
 }
@@ -343,47 +379,47 @@ static int room_save_checked(const char *name, int fast)
   my_mstrcat(_ALLOC_ID_, &header, "xschem version=",
       get_tok_value(xctx->version_string, "version", 0), " file_version=", xctx->file_version,
       xctx->header_text && xctx->header_text[0] ? "\n" : "", xctx->header_text ? xctx->header_text : "", NULL);
-  i = room_emit('v', 0, 0, 0, NULL, 0, NULL, header);
+  i = room_emit('v', 0, 0, 0, NULL, 0, NULL, header, 0);
   my_free(_ALLOC_ID_, &header);
   if(!i) return 0;
-  if(!room_emit('G', 0, 0, 0, NULL, 0, NULL, xctx->schvhdlprop) ||
-     !room_emit('K', 0, 0, 0, NULL, 0, NULL, xctx->schsymbolprop) ||
-     !room_emit('V', 0, 0, 0, NULL, 0, NULL, xctx->schverilogprop) ||
-     !room_emit('S', 0, 0, 0, NULL, 0, NULL, xctx->schprop) ||
-     !room_emit('F', 0, 0, 0, NULL, 0, NULL, xctx->schspectreprop) ||
-     !room_emit('E', 0, 0, 0, NULL, 0, NULL, xctx->schtedaxprop)) return 0;
+  if(!room_emit('G', 0, 0, 0, NULL, 0, NULL, xctx->schvhdlprop, 0) ||
+     !room_emit('K', 0, 0, 0, NULL, 0, NULL, xctx->schsymbolprop, 0) ||
+     !room_emit('V', 0, 0, 0, NULL, 0, NULL, xctx->schverilogprop, 0) ||
+     !room_emit('S', 0, 0, 0, NULL, 0, NULL, xctx->schprop, 0) ||
+     !room_emit('F', 0, 0, 0, NULL, 0, NULL, xctx->schspectreprop, 0) ||
+     !room_emit('E', 0, 0, 0, NULL, 0, NULL, xctx->schtedaxprop, 0)) return 0;
   for(c = 0; c < cadlayers; ++c) {
     for(i = 0; i < xctx->lines[c]; ++i) {
       xLine *p = &xctx->line[c][i]; double v[] = {p->x1,p->y1,p->x2,p->y2};
-      if(!room_emit('L',c,0,0,v,4,NULL,p->prop_ptr)) return 0;
+      if(!room_emit('L',c,0,0,v,4,NULL,p->prop_ptr,0)) return 0;
     }
     for(i = 0; i < xctx->rects[c]; ++i) {
       xRect *p = &xctx->rect[c][i]; double v[] = {p->x1,p->y1,p->x2,p->y2};
-      if(!room_emit('B',c,0,0,v,4,NULL,p->prop_ptr)) return 0;
+      if(!room_emit('B',c,0,0,v,4,NULL,p->prop_ptr,0)) return 0;
     }
     for(i = 0; i < xctx->arcs[c]; ++i) {
       xArc *p = &xctx->arc[c][i]; double v[] = {p->x,p->y,p->r,p->a,p->b};
-      if(!room_emit('A',c,0,0,v,5,NULL,p->prop_ptr)) return 0;
+      if(!room_emit('A',c,0,0,v,5,NULL,p->prop_ptr,0)) return 0;
     }
     for(i = 0; i < xctx->polygons[c]; ++i) {
       xPoly *p = &xctx->poly[c][i]; double *v = my_malloc(_ALLOC_ID_, p->points * 2 * sizeof(double));
       int ok;
       for(j = 0; j < p->points; ++j) { v[j*2] = p->x[j]; v[j*2+1] = p->y[j]; }
-      ok = room_emit('P',c,0,0,v,p->points*2,NULL,p->prop_ptr);
+      ok = room_emit('P',c,0,0,v,p->points*2,NULL,p->prop_ptr,0);
       my_free(_ALLOC_ID_, &v); if(!ok) return 0;
     }
   }
   for(i = 0; i < xctx->wires; ++i) {
     xWire *p = &xctx->wire[i]; double v[] = {p->x1,p->y1,p->x2,p->y2};
-    if(!room_emit('N',0,0,0,v,4,NULL,p->prop_ptr)) return 0;
+    if(!room_emit('N',0,0,0,v,4,NULL,p->prop_ptr,0)) return 0;
   }
   for(i = 0; i < xctx->texts; ++i) {
     xText *p = &xctx->text[i]; double v[] = {p->x0,p->y0,p->xscale,p->yscale};
-    if(!room_emit('T',0,p->rot,p->flip,v,4,p->txt_ptr,p->prop_ptr)) return 0;
+    if(!room_emit('T',0,p->rot,p->flip,v,4,p->txt_ptr,p->prop_ptr,0)) return 0;
   }
   for(i = 0; i < xctx->instances; ++i) {
     xInstance *p = &xctx->inst[i]; double v[] = {p->x0,p->y0};
-    if(!room_emit('C',0,p->rot,p->flip,v,2,p->name,p->prop_ptr)) return 0;
+    if(!room_emit('C',0,p->rot,p->flip,v,2,p->name,p->prop_ptr,room_instance_verified(p))) return 0;
   }
   if(!rx_commit(xctx->room_document, &error)) return room_failure(error, "Cannot save ROOM; editor edits retained");
   if(!stat(name, &st)) xctx->time_last_modify = st.st_mtime;
