@@ -3070,7 +3070,7 @@ static void save_embedded_symbol(xSymbol *s, FILE *fd)
   }
 }
 
-static void save_inst(FILE *fd, int select_only)
+static void save_inst(FILE *fd, int select_only, int digits)
 {
  int i, oldversion;
  xInstance *inst;
@@ -3098,7 +3098,7 @@ static void save_inst(FILE *fd, int select_only)
   } else {
     save_ascii_string(inst[i].name, fd, 0);
   }
-  fprintf(fd, " %.16g %.16g %hd %hd ",inst[i].x0, inst[i].y0, inst[i].rot, inst[i].flip );
+  fprintf(fd, " %.*g %.*g %hd %hd ", digits, inst[i].x0, digits, inst[i].y0, inst[i].rot, inst[i].flip);
   save_ascii_string(inst[i].prop_ptr,fd, 1);
   if(ptr >= 0 && embedded_saved && !embedded_saved[ptr] && inst[i].embed) {
     embedded_saved[ptr] = 1;
@@ -3111,7 +3111,7 @@ static void save_inst(FILE *fd, int select_only)
  my_free(_ALLOC_ID_, &embedded_saved);
 }
 
-static void save_wire(FILE *fd, int select_only)
+static void save_wire(FILE *fd, int select_only, int digits)
 {
  int i;
  xWire *ptr;
@@ -3120,13 +3120,13 @@ static void save_wire(FILE *fd, int select_only)
  for(i=0;i<xctx->wires; ++i)
  {
    if (select_only && ptr[i].sel != SELECTED) continue;
-  fprintf(fd, "N %.16g %.16g %.16g %.16g ",ptr[i].x1, ptr[i].y1, ptr[i].x2,
-     ptr[i].y2);
+  fprintf(fd, "N %.*g %.*g %.*g %.*g ",
+     digits, ptr[i].x1, digits, ptr[i].y1, digits, ptr[i].x2, digits, ptr[i].y2);
   save_ascii_string(ptr[i].prop_ptr,fd, 1);
  }
 }
 
-static void save_text(FILE *fd, int select_only)
+static void save_text(FILE *fd, int select_only, int digits)
 {
  int i;
  xText *ptr;
@@ -3136,14 +3136,14 @@ static void save_text(FILE *fd, int select_only)
    if (select_only && ptr[i].sel != SELECTED) continue;
   fprintf(fd, "T ");
   save_ascii_string(ptr[i].txt_ptr,fd, 0);
-  fprintf(fd, " %.16g %.16g %hd %hd %.16g %.16g ",
-   ptr[i].x0, ptr[i].y0, ptr[i].rot, ptr[i].flip, ptr[i].xscale,
-    ptr[i].yscale);
+  fprintf(fd, " %.*g %.*g %hd %hd %.*g %.*g ",
+   digits, ptr[i].x0, digits, ptr[i].y0, ptr[i].rot, ptr[i].flip,
+   digits, ptr[i].xscale, digits, ptr[i].yscale);
   save_ascii_string(ptr[i].prop_ptr,fd, 1);
  }
 }
 
-static void save_polygon(FILE *fd, int select_only)
+static void save_polygon(FILE *fd, int select_only, int digits)
 {
     int c, i, j;
     xPoly *ptr;
@@ -3155,14 +3155,14 @@ static void save_polygon(FILE *fd, int select_only)
        if (select_only && ptr[i].sel != SELECTED) continue;
       fprintf(fd, "P %d %d ", c,ptr[i].points);
       for(j=0;j<ptr[i].points; ++j) {
-        fprintf(fd, "%.16g %.16g ", ptr[i].x[j], ptr[i].y[j]);
+        fprintf(fd, "%.*g %.*g ", digits, ptr[i].x[j], digits, ptr[i].y[j]);
       }
       save_ascii_string(ptr[i].prop_ptr,fd, 1);
      }
     }
 }
 
-static void save_arc(FILE *fd, int select_only)
+static void save_arc(FILE *fd, int select_only, int digits)
 {
     int c, i;
     xArc *ptr;
@@ -3172,14 +3172,14 @@ static void save_arc(FILE *fd, int select_only)
      for(i=0;i<xctx->arcs[c]; ++i)
      {
        if (select_only && ptr[i].sel != SELECTED) continue;
-      fprintf(fd, "A %d %.16g %.16g %.16g %.16g %.16g ", c,ptr[i].x, ptr[i].y,ptr[i].r,
-       ptr[i].a, ptr[i].b);
+      fprintf(fd, "A %d %.*g %.*g %.*g %.*g %.*g ", c,
+        digits, ptr[i].x, digits, ptr[i].y, digits, ptr[i].r, digits, ptr[i].a, digits, ptr[i].b);
       save_ascii_string(ptr[i].prop_ptr,fd, 1);
      }
     }
 }
 
-static void save_box(FILE *fd, int select_only)
+static void save_box(FILE *fd, int select_only, int digits)
 {
     int c, i;
     xRect *ptr;
@@ -3189,14 +3189,14 @@ static void save_box(FILE *fd, int select_only)
      for(i=0;i<xctx->rects[c]; ++i)
      {
        if (select_only && ptr[i].sel != SELECTED) continue;
-      fprintf(fd, "B %d %.16g %.16g %.16g %.16g ", c,ptr[i].x1, ptr[i].y1,ptr[i].x2,
-       ptr[i].y2);
+      fprintf(fd, "B %d %.*g %.*g %.*g %.*g ", c,
+        digits, ptr[i].x1, digits, ptr[i].y1, digits, ptr[i].x2, digits, ptr[i].y2);
       save_ascii_string(ptr[i].prop_ptr,fd, 1);
      }
     }
 }
 
-static void save_line(FILE *fd, int select_only)
+static void save_line(FILE *fd, int select_only, int digits)
 {
     int c, i;
     xLine *ptr;
@@ -3206,8 +3206,8 @@ static void save_line(FILE *fd, int select_only)
      for(i=0;i<xctx->lines[c]; ++i)
      {
        if (select_only && ptr[i].sel != SELECTED) continue;
-      fprintf(fd, "L %d %.16g %.16g %.16g %.16g ", c,ptr[i].x1, ptr[i].y1,ptr[i].x2,
-       ptr[i].y2 );
+      fprintf(fd, "L %d %.*g %.*g %.*g %.*g ", c,
+        digits, ptr[i].x1, digits, ptr[i].y1, digits, ptr[i].x2, digits, ptr[i].y2);
       save_ascii_string(ptr[i].prop_ptr,fd, 1);
      }
     }
@@ -3215,18 +3215,18 @@ static void save_line(FILE *fd, int select_only)
 
 #ifdef XSCHEM_HAS_ROOM
 #include "room_direct.inc"
-static int room_undo_versions;
 #endif
 
-static void write_xschem_file(FILE *fd)
+static void write_xschem_file(FILE *fd, int room_snapshot)
 {
+  const int digits = room_snapshot ? 17 : 16; /* Round-trip binary64 in ROOM snapshots. */
   size_t ty=0;
   char *tmpstring = NULL;
   size_t tmpstring_size;
   char *header_ptr = xctx->header_text ? xctx->header_text : "";
 #ifdef XSCHEM_HAS_ROOM
-  const char *tool_version = room_undo_versions ? get_tok_value(xctx->version_string, "version", 0) : XSCHEM_VERSION;
-  const char *file_version = room_undo_versions ? xctx->file_version : XSCHEM_FILE_VERSION;
+  const char *tool_version = room_snapshot ? get_tok_value(xctx->version_string, "version", 0) : XSCHEM_VERSION;
+  const char *file_version = room_snapshot ? xctx->file_version : XSCHEM_FILE_VERSION;
 #endif
   dbg(1, ("write_xschem_file(): %s\n", xctx->current_name));
   tmpstring_size = strlen(header_ptr) + 100;
@@ -3281,13 +3281,13 @@ static void write_xschem_file(FILE *fd)
   fprintf(fd, "E ");
   save_ascii_string(xctx->schtedaxprop,fd, 1);
 
-  save_line(fd, 0);
-  save_box(fd, 0);
-  save_arc(fd, 0);
-  save_polygon(fd, 0);
-  save_text(fd, 0);
-  save_wire(fd, 0);
-  save_inst(fd, 0);
+  save_line(fd, 0, digits);
+  save_box(fd, 0, digits);
+  save_arc(fd, 0, digits);
+  save_polygon(fd, 0, digits);
+  save_text(fd, 0, digits);
+  save_wire(fd, 0, digits);
+  save_inst(fd, 0, digits);
 }
 
 static void load_text(FILE *fd)
@@ -3821,13 +3821,13 @@ static void make_schematic(const char *schname)
   fprintf(fd, "%s\n", "template=\"name=x1\"");
   fprintf(fd, "%s", "}\n");
   fputc('\n', fd);
-  save_line(fd, 1);
-  save_box(fd, 1);
-  save_arc(fd, 1);
-  save_polygon(fd, 1);
-  save_text(fd, 1);
-  save_wire(fd, 1);
-  save_inst(fd, 1);
+  save_line(fd, 1, 16);
+  save_box(fd, 1, 16);
+  save_arc(fd, 1, 16);
+  save_polygon(fd, 1, 16);
+  save_text(fd, 1, 16);
+  save_wire(fd, 1, 16);
+  save_inst(fd, 1, 16);
   fclose(fd);
 }
 
@@ -3977,7 +3977,7 @@ int save_schematic(const char *schname, int fast) /* 20171020 added return value
   rects = xctx->rects[PINLAYER];
   rect = xctx->rect[PINLAYER];
   sort_symbol_pins(rect, rects, schname);
-  write_xschem_file(fd);
+  write_xschem_file(fd, 0);
   fclose(fd);
   /* update time stamp */
   if(!stat(schname, &buf)) {
@@ -4258,7 +4258,7 @@ static void write_current_schematic_to_fp(FILE *fd)
   rects = xctx->rects[PINLAYER];
   rect = xctx->rect[PINLAYER];
   sort_symbol_pins(rect, rects, xctx->sch[xctx->currsch] ? xctx->sch[xctx->currsch] : "buffer");
-  write_xschem_file(fd);
+  write_xschem_file(fd, 0);
 }
 
 /* Load schematic/symbol records from memory (ROOM native bridge). */
@@ -4571,11 +4571,9 @@ void push_undo(int what)
   my_snprintf(diff_name, S(diff_name), "%s/undo%d", xctx->undo_dirname, undo_index);
   if((fd = open_write_undo_file(diff_name, &pid))) {
 #ifdef XSCHEM_HAS_ROOM
-    room_undo_versions = xctx->room_document != NULL;
-#endif
-    write_xschem_file(fd);
-#ifdef XSCHEM_HAS_ROOM
-    room_undo_versions = 0;
+    write_xschem_file(fd, xctx->room_document != NULL);
+#else
+    write_xschem_file(fd, 0);
 #endif
     close_undo_file(fd, pid);
   }

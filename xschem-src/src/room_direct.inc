@@ -207,9 +207,12 @@ static int room_receive(void *user, const rx_record *r)
         info("ROOM symbol: %s\n", text);
         room_failure(NULL, "ROOM requires an existing external .sym; generators and ROOM-only symbols are unsupported"); ok = 0;
       } else {
+        const char *editable_type = rx_value_symbol_type(r->text);
         get_sym_type(text, &type, NULL, NULL, NULL);
         if(!type || !type[0] || !strcmp(type, "subcircuit")) {
           room_failure(NULL, "ROOM Phase 1 requires flat device symbols with a declared type; subcircuits are unsupported"); ok = 0;
+        } else if(editable_type && strcmp(editable_type, type)) {
+          room_failure(NULL, "ROOM requires the standard device type for editable symbols"); ok = 0;
         }
         my_free(_ALLOC_ID_, &type);
       }

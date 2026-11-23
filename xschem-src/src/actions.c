@@ -572,19 +572,13 @@ int save(int confirm, int fast)
     if(has_x && confirm) {
       tcleval("ask_save");
       if(!strcmp(tclresult(), "") ) return -1; /* user clicks "Cancel" */
-#ifdef XSCHEM_HAS_ROOM
-      else if(!strcmp(tclresult(), "yes") ) return room_save_current(fast);
-#else
-      else if(!strcmp(tclresult(), "yes") ) return save_schematic(xctx->sch[xctx->currsch], fast);
-#endif
-      else return 0; /* user clicks "no" */
-    } else {
-#ifdef XSCHEM_HAS_ROOM
-      return room_save_current(fast);
-#else
-      return save_schematic(xctx->sch[xctx->currsch], fast);
-#endif
+      if(strcmp(tclresult(), "yes")) return 0; /* user clicks "no" */
     }
+#ifdef XSCHEM_HAS_ROOM
+    return room_save_current(fast);
+#else
+    return save_schematic(xctx->sch[xctx->currsch], fast);
+#endif
   }
   return 1; /* circuit not changed: always succeeed */
 }

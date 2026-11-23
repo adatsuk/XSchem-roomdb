@@ -2,11 +2,14 @@
 
 A ROOM-enabled editor opens a flat binary `.room` schematic directly in
 memory. Open it from the file dialog, the command line or `xschem load`.
-You can save changed values of existing instance parameters. Structural
-changes, Save As and new ROOM files are refused. A refused save leaves
+You can save an existing `value` on the standard resistor, capacitor and
+inductor symbols (`res.sym`, `capa.sym`, `ind.sym`, with or without `devices/`).
+Other attribute changes, structural changes, Save As and new ROOM files
+are refused. Quote values with literal backslashes or double quotes and
+escape those characters inside the quotes. A refused save leaves
 the editor dirty and cancels the Open or Close operation that requested it.
-Undo the unsupported edit to continue. Memory and disk undo use Xschem's
-normal undo mechanisms.
+Undo the unsupported edit to continue. Memory and disk undo are supported.
+ROOM disk snapshots use 17 significant digits to preserve drawing coordinates.
 
 Use a clean Xschem rcfile. The legacy `room.tcl` integration and this
 native build are mutually exclusive. ROOM files need external flat device
@@ -46,6 +49,12 @@ pointing at a disposable copy of the demo's `.room` file. Review
 failed Open, Save As, carriage returns and stale files with scripts
 disabled. Observe filesystem writes to distinguish Xschem's undo
 snapshots from a schematic working copy.
+
+`minimal-regressions.tcl` checks the save scope, unquoted escape refusal
+and high-precision arc undo. Run it in a fresh process per case with a
+disposable `REVIEW_FILE`, `REVIEW_CASE` set to `scope`, `escape` or `precision`,
+and `REVIEW_UNDO` set to `disk` or `memory` for `precision`. The fixture and
+invocation details are in the implementation handoff `FIXES.md`.
 
 Use a separate copy for the ordinary build and omit `ROOM_PREFIX`.
 The makefile accepts `ROOM_PREFIX` only from the make command line.
