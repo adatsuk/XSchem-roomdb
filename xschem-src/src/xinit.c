@@ -379,6 +379,9 @@ void init_pixdata()/* populate xctx->fill_type array that is used in create_gc()
 void free_xschem_data()
 {
   int i;
+#ifdef XSCHEM_HAS_ROOM
+  room_close_document();
+#endif
   xctx->delete_undo();
   free_simdata();
 
@@ -3611,6 +3614,15 @@ int Tcl_AppInit(Tcl_Interp *inter)
    }
  }
  /* END SOURCING xschemrc */
+#ifdef XSCHEM_HAS_ROOM
+ {
+   Tcl_CmdInfo command;
+   if(Tcl_GetCommandInfo(interp, "room_ensure_loaded", &command)) {
+     info("Native ROOM and legacy room.tcl cannot run together; use a clean rcfile\n");
+     Tcl_Exit(EXIT_FAILURE);
+   }
+ }
+#endif
 
 
  /* test again if running xschem in src/ dir after xschemrc settings */

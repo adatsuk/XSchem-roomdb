@@ -3213,21 +3213,38 @@ static void save_line(FILE *fd, int select_only)
     }
 }
 
+#ifdef XSCHEM_HAS_ROOM
+#include "room_direct.inc"
+static int room_undo_versions;
+#endif
+
 static void write_xschem_file(FILE *fd)
 {
   size_t ty=0;
   char *tmpstring = NULL;
   size_t tmpstring_size;
   char *header_ptr = xctx->header_text ? xctx->header_text : "";
+#ifdef XSCHEM_HAS_ROOM
+  const char *tool_version = room_undo_versions ? get_tok_value(xctx->version_string, "version", 0) : XSCHEM_VERSION;
+  const char *file_version = room_undo_versions ? xctx->file_version : XSCHEM_FILE_VERSION;
+#endif
   dbg(1, ("write_xschem_file(): %s\n", xctx->current_name));
   tmpstring_size = strlen(header_ptr) + 100;
   tmpstring = my_malloc(_ALLOC_ID_, tmpstring_size);
   if(xctx->header_text && xctx->header_text[0]) {
     my_snprintf(tmpstring, tmpstring_size, "xschem version=%s file_version=%s\n%s",
+#ifdef XSCHEM_HAS_ROOM
+        tool_version, file_version, header_ptr);
+#else
         XSCHEM_VERSION, XSCHEM_FILE_VERSION, header_ptr);
+#endif
   } else {
     my_snprintf(tmpstring, tmpstring_size, "xschem version=%s file_version=%s",
+#ifdef XSCHEM_HAS_ROOM
+        tool_version, file_version);
+#else
         XSCHEM_VERSION, XSCHEM_FILE_VERSION);
+#endif
   }
   fprintf(fd, "v ");
   save_ascii_string(tmpstring, fd, 1);
@@ -3924,6 +3941,9 @@ int save_schematic(const char *schname, int fast) /* 20171020 added return value
   char msg[PATH_MAX + 100];
 
   if(!schname || !strcmp(schname, "")) return 0;
+#ifdef XSCHEM_HAS_ROOM
+  if(xctx->room_document || is_room_document(schname)) return room_save(schname, fast);
+#endif
 
   dbg(1, ("save_schematic(): currsch=%d schname=%s\n",xctx->currsch, schname));
   dbg(1, ("save_schematic(): sch[currsch]=%s\n", xctx->sch[xctx->currsch] ? xctx->sch[xctx->currsch] : "<NULL>"));
@@ -4039,6 +4059,16 @@ int load_schematic(int load_symbols, const char *fname, int reset_undo, int aler
   char msg[PATH_MAX+100];
   struct stat buf;
   int ret = 1; /* success */
+
+#ifdef XSCHEM_HAS_ROOM
+  if(is_room_document(fname)) {
+    if(!room_load(fname, load_symbols, reset_undo)) return 0;
+    goto finish_load;
+  }
+  if(xctx->room_document && !reset_undo)
+    return room_failure(NULL, "Switching from ROOM requires a fresh undo history");
+  room_close_document();
+#endif
 
   xctx->prep_hi_structs=0;
   xctx->prep_net_structs=0;
@@ -4176,8 +4206,15 @@ int load_schematic(int load_symbols, const char *fname, int reset_undo, int aler
     set_unique_sch_name(xctx, (xctx->netlist_type == CAD_SYMBOL_ATTRS) ? "untitled.sym" : "untitled.sch");
     if(reset_undo) set_modify(0);
   }
+#ifdef XSCHEM_HAS_ROOM
+finish_load:
+  if(!xctx->room_document) {
+#endif
   check_collapsing_objects();
   if(reset_undo && tclgetboolvar("autotrim_wires")) trim_wires();
+#ifdef XSCHEM_HAS_ROOM
+  }
+#endif
   update_conn_cues(WIRELAYER, 0, 0);
   if(xctx->hilight_nets && load_symbols) {
     propagate_hilights(1, 1, XINSERT_NOREPLACE);
@@ -4233,6 +4270,10 @@ int load_schematic_from_buffer(const char *data, size_t len, const char *logical
   int ret = 1;
 
   if(!xctx) return 0;
+#ifdef XSCHEM_HAS_ROOM
+  if(xctx->room_document || is_room_document(logical_name))
+    return room_failure(NULL, "Text-buffer replacement of a ROOM document is unsupported");
+#endif
   xctx->prep_hi_structs=0;
   xctx->prep_net_structs=0;
   xctx->prep_hash_inst=0;
@@ -4529,7 +4570,13 @@ void push_undo(int what)
 
   my_snprintf(diff_name, S(diff_name), "%s/undo%d", xctx->undo_dirname, undo_index);
   if((fd = open_write_undo_file(diff_name, &pid))) {
+#ifdef XSCHEM_HAS_ROOM
+    room_undo_versions = xctx->room_document != NULL;
+#endif
     write_xschem_file(fd);
+#ifdef XSCHEM_HAS_ROOM
+    room_undo_versions = 0;
+#endif
     close_undo_file(fd, pid);
   }
 

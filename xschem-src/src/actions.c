@@ -572,10 +572,18 @@ int save(int confirm, int fast)
     if(has_x && confirm) {
       tcleval("ask_save");
       if(!strcmp(tclresult(), "") ) return -1; /* user clicks "Cancel" */
+#ifdef XSCHEM_HAS_ROOM
+      else if(!strcmp(tclresult(), "yes") ) return room_save_current(fast);
+#else
       else if(!strcmp(tclresult(), "yes") ) return save_schematic(xctx->sch[xctx->currsch], fast);
+#endif
       else return 0; /* user clicks "no" */
     } else {
+#ifdef XSCHEM_HAS_ROOM
+      return room_save_current(fast);
+#else
       return save_schematic(xctx->sch[xctx->currsch], fast);
+#endif
     }
   }
   return 1; /* circuit not changed: always succeeed */
@@ -589,6 +597,9 @@ int saveas(const char *f, int type) /*  changed name from ask_save_file to savea
     char res[PATH_MAX];
     char *p;
     int saved = 0;
+#ifdef XSCHEM_HAS_ROOM
+    if(xctx->room_document || is_room_document(f)) return room_refuse_saveas();
+#endif
     if(!f && has_x) {
       my_strncpy(filename , xctx->sch[xctx->currsch], S(filename));
       if(type == SYMBOL) {
@@ -609,6 +620,9 @@ int saveas(const char *f, int type) /*  changed name from ask_save_file to savea
     else res[0]='\0';
 
     if(!res[0]) return saved;
+#ifdef XSCHEM_HAS_ROOM
+    if(is_room_document(res)) return room_refuse_saveas();
+#endif
     dbg(1, ("saveas(): res = %s\n", res));
     saved = save_schematic(res, 0);
     tclvareval("update_recent_file {", res,"}",  NULL);
@@ -632,7 +646,11 @@ int ask_new_file(int in_new_window, char *filename)
       }
     }
     if(!filename || !filename[0]) {
+#ifdef XSCHEM_HAS_ROOM
+      tcleval("load_file_dialog {Load file} *.\\{sch,sym,tcl,room\\} INITIALLOADDIR");
+#else
       tcleval("load_file_dialog {Load file} *.\\{sch,sym,tcl\\} INITIALLOADDIR");
+#endif
       my_snprintf(f, S(f),"%s", tclresult());
     } else {
       my_strncpy(f, filename, S(f));
@@ -653,14 +671,24 @@ int ask_new_file(int in_new_window, char *filename)
         if(!(in_new_window || tclgetboolvar("open_in_new_window"))) {
           dbg(1, ("ask_new_file(): load file: %s\n", f));
           clear_all_hilights();
+#ifdef XSCHEM_HAS_ROOM
+          if(!is_room_document(f)) {
+#endif
           xctx->currsch = 0;
           unselect_all(1);
           remove_symbols();
+#ifdef XSCHEM_HAS_ROOM
+          }
+#endif
           xctx->zoom=CADINITIALZOOM;
           xctx->mooz=1/CADINITIALZOOM;
           xctx->xorigin=CADINITIALX;
           xctx->yorigin=CADINITIALY;
+#ifdef XSCHEM_HAS_ROOM
+          if(!load_schematic(1, f, 1, 1) && is_room_document(f)) return 0;
+#else
           load_schematic(1, f, 1, 1);
+#endif
           tclvareval("update_recent_file {", f, "}", NULL);
           if(xctx->portmap[xctx->currsch].table) str_hash_free(&xctx->portmap[xctx->currsch]);
           my_strdup(_ALLOC_ID_, &xctx->sch_path[xctx->currsch],".");
@@ -3028,6 +3056,9 @@ void clear_schematic(int cancel, int symbol)
    xctx->currsch = 0;
    unselect_all(1);
    remove_symbols();
+#ifdef XSCHEM_HAS_ROOM
+   room_close_document();
+#endif
    clear_drawing();
    my_strncpy(xctx->current_name, "", S(xctx->current_name));
    set_unique_sch_name(xctx, symbol ? "untitled.sym" : "untitled.sch");

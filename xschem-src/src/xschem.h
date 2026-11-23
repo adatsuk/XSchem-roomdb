@@ -957,6 +957,10 @@ typedef struct {
   int maxw;
   int maxi;
   int maxs;
+#ifdef XSCHEM_HAS_ROOM
+  struct rx_document *room_document;
+  char *room_path;
+#endif
   char *schprop;
   char *schtedaxprop;
   char *schvhdlprop;
@@ -1945,3 +1949,11 @@ extern void create_ps(char** psfile, int what, int fullzoom, int eps);
 extern void MyXCopyArea(Display* display, Drawable src, Drawable dest, GC gc, int src_x, int src_y, unsigned int width, unsigned int height, int dest_x, int dest_y);
 extern int win_regexec(const char *options, const char *pattern, const char *name);
 #endif /*CADGLOBALS */
+
+
+#ifdef XSCHEM_HAS_ROOM
+extern int is_room_document(const char *name);
+extern void room_close_document(void);
+extern int room_save_current(int fast);
+extern int room_refuse_saveas(void);
+#endif

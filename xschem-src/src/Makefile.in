@@ -37,6 +37,13 @@ all: xschem rawtovcd
 
 include $(ROOT)/Makefile.conf
 
+# Opt in on the make command line with ROOM_PREFIX pointing to the typed adapter install;
+# a ROOM_PREFIX in the environment is ignored.
+ifeq ($(origin ROOM_PREFIX),command line)
+CFLAGS += -DXSCHEM_HAS_ROOM -I$(ROOM_PREFIX)/include
+LDFLAGS += -L$(ROOM_PREFIX)/lib -Wl,-rpath,$(ROOM_PREFIX)/lib -lroom_xschem
+endif
+
 rawtovcd: rawtovcd.o
 	$(CC) -o  rawtovcd rawtovcd.o -lm
 
@@ -62,6 +69,9 @@ eval_expr.c: eval_expr.y
 parselabel.o: expandlabel.h
 
 $(OBJ): xschem.h ../config.h Makefile
+ifeq ($(origin ROOM_PREFIX),command line)
+save.o: room_direct.inc
+endif
 
 clean: FORCE
 	rm -rf rawtovcd xschem *.o eval_expr.c expandlabel.[ch] parselabel.c

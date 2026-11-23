@@ -3305,8 +3305,14 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
             /* no implicit undo: if needed do it before loading */
             /* if(!undo_reset) xctx->push_undo(0); */
             if(!first_loaded) {
+#ifdef XSCHEM_HAS_ROOM
+              if(!is_room_document(f)) {
+#endif
               if(undo_reset) xctx->currsch = 0;
               if(!keep_symbols) remove_symbols();
+#ifdef XSCHEM_HAS_ROOM
+              }
+#endif
               if(!nofullzoom) {
                 xctx->zoom=CADINITIALZOOM;
                 xctx->mooz=1/CADINITIALZOOM;
@@ -3325,6 +3331,9 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
             } else {
               first_loaded = 1;
               ret = load_schematic(load_symbols, f, undo_reset, !force);
+#ifdef XSCHEM_HAS_ROOM
+              if(!ret && is_room_document(f)) return TCL_ERROR;
+#endif
               dbg(1, ("xschem load: f=%s, ret=%d\n", f, ret));
               if(undo_reset) {
                 tclvareval("update_recent_file {", f, "}", NULL);
@@ -3441,7 +3450,11 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
           }
         }
       } else {
+#ifdef XSCHEM_HAS_ROOM
+        tcleval("load_file_dialog {Load file} *.\\{sch,sym,tcl,room\\} INITIALLOADDIR");
+#else
         tcleval("load_file_dialog {Load file} *.\\{sch,sym,tcl\\} INITIALLOADDIR");
+#endif
         if(tclresult()[0]) {
           my_snprintf(f, S(f), "%s", tclresult());
         } else {
@@ -4981,8 +4994,16 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
     {
       if(!xctx) {Tcl_SetResult(interp, not_avail, TCL_STATIC); return TCL_ERROR;}
       unselect_all(1);
+#ifdef XSCHEM_HAS_ROOM
+      if(xctx->room_document) {
+        if(!load_schematic(1, xctx->sch[xctx->currsch], 1, 1)) return TCL_ERROR;
+      } else {
+#endif
       remove_symbols();
       load_schematic(1, xctx->sch[xctx->currsch], 1, 1);
+#ifdef XSCHEM_HAS_ROOM
+      }
+#endif
       if(argc > 2 && !strcmp(argv[2], "zoom_full") ) {
         zoom_full(1, 0, 1 + 2 * tclgetboolvar("zoom_full_center"), 0.97);
       } else {
@@ -5278,6 +5299,11 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
       if(!strcmp(xctx->sch[xctx->currsch], "")) {   /* check if unnamed schematic, use saveas in this case... */
         saveas(NULL, SCHEMATIC);
       } else {
+#ifdef XSCHEM_HAS_ROOM
+        if(xctx->room_document) {
+          if(room_save_current(fast) != 1) return TCL_ERROR;
+        } else
+#endif
         save(0, fast);
       }
     }
@@ -5351,6 +5377,9 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
         tclvareval("cleanup_path {", argv[2], "}", NULL);
         my_strncpy(f, tclresult(), S(f));
       }
+#ifdef XSCHEM_HAS_ROOM
+      Tcl_UnsetVar(interp, "room_native_error", TCL_GLOBAL_ONLY);
+#endif
       if(argc > 3) {
         fptr = !strcmp(f, "") ? NULL : f;
         if(!strcmp(argv[3], "schematic")) saved = saveas(fptr, SCHEMATIC);
@@ -5362,6 +5391,9 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
         saved = saveas(fptr, SCHEMATIC);
       }
       else saved = saveas(NULL, SCHEMATIC);
+#ifdef XSCHEM_HAS_ROOM
+      if(!saved && Tcl_GetVar2Ex(interp, "room_native_error", NULL, TCL_GLOBAL_ONLY)) return TCL_ERROR;
+#endif
       Tcl_SetResult(interp, my_itoa(saved), TCL_VOLATILE);
     }
 
