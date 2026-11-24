@@ -253,9 +253,16 @@ int save_undo_table(const char *sch_name, void *ptr, int what) {
         entry = undo_dir_hash.table[i];
         while( res == 1 && entry ) {
           int j, found;
+          const char *schname = NULL;
           undo_item = entry->value;
           /* skip hierarchy schematics of other tabs/window */
           if(strstr(entry->token, xctx->current_win_path) != entry->token) {
+            entry = entry->next;
+            continue;
+          }
+          schname = strchr(entry->token, '/') + 1;
+          if(fork_sch(7, schname, 0, 1)){ /* don't delete undo data for schematics stored with fork_sch */
+            dbg(1, ("save_undo_table(..., XASK_SAVE | XDELETE...): skip deletion of %s\n", entry->token));
             entry = entry->next;
             continue;
           }
@@ -4053,7 +4060,13 @@ void link_symbols_to_instances(int from)
 }
 
 /* ALWAYS use absolute pathname for fname!!!
- * alert = 0 --> do not show alert if file not existing */
+ * alert = 0 --> do not show alert if file not existing
+ * reset_undo: (normallty set to 1)
+ *   1 : Reset undo buffer
+ *   2 : Do NOT set window / tab title and modify flag
+ *   4 : Do NOT touch file timestamps
+ *   8 : Do NOT trim wires even if autotrim is enabled 
+ *  16 : Do NOT touch netlist_dir and/or set netlist_type */
 int load_schematic(int load_symbols, const char *fname, int reset_undo, int alert)
 {
   FILE *fd;
@@ -4078,7 +4091,7 @@ int load_schematic(int load_symbols, const char *fname, int reset_undo, int aler
   xctx->prep_hash_inst=0;
   xctx->prep_hash_wires=0;
   my_strdup2(_ALLOC_ID_, &ffname, trim_chars(fname, " \t\n"));
-  if(reset_undo) {
+  if(reset_undo & 1) {
     xctx->delete_undo();
     xctx->prev_set_modify = -1; /* will force set_modify(0) to set window title */
   }
@@ -4140,7 +4153,7 @@ int load_schematic(int load_symbols, const char *fname, int reset_undo, int aler
       my_free(_ALLOC_ID_, &ffname);
       return 0; /* empty filename */
     }
-    if(reset_undo) {
+    if(!(reset_undo & 4)) {
       if(!stat(name, &buf)) { /* file exists */
         xctx->time_last_modify =  buf.st_mtime;
       } else {
@@ -4175,17 +4188,17 @@ int load_schematic(int load_symbols, const char *fname, int reset_undo, int aler
         xctx->loaded_symbol = 1;
       }
       clear_drawing();
-      if(reset_undo) set_modify(0);
+      if(!(reset_undo & 2)) set_modify(0);
     } else {
       clear_drawing();
       dbg(1, ("load_schematic(): reading file: %s\n", name));
       read_xschem_file(fd);
       if(generator) pclose(fd);
       else fclose(fd); /* 20150326 moved before load symbols */
-      if(reset_undo) set_modify(0);
+      if(!(reset_undo & 2)) set_modify(0);
       dbg(2, ("load_schematic(): loaded file:wire=%d inst=%d\n",xctx->wires , xctx->instances));
       if(load_symbols) link_symbols_to_instances(-1);
-      if(reset_undo) {
+      if(!(reset_undo & 16)) {
         tclvareval("is_xschem_file {", xctx->sch[xctx->currsch], "}", NULL);
         if(!strcmp(tclresult(), "SYMBOL") || xctx->instances == 0) {
           if(xctx->netlist_type != CAD_SYMBOL_ATTRS) xctx->save_netlist_type = xctx->netlist_type;
@@ -4204,17 +4217,17 @@ int load_schematic(int load_symbols, const char *fname, int reset_undo, int aler
     dbg(1, ("load_schematic(): %s, returning\n", xctx->sch[xctx->currsch]));
   } else { /* ffname == NULL or empty */
     /* if(reset_undo) xctx->time_last_modify = time(NULL); */ /* no file given, set mtime to current time */
-    if(reset_undo) xctx->time_last_modify = -1; /* no file given, set mtime to -1 (undefined) */
+    if(!(reset_undo & 4)) xctx->time_last_modify = -1; /* no file given, set mtime to -1 (undefined) */
     clear_drawing();
     set_unique_sch_name(xctx, (xctx->netlist_type == CAD_SYMBOL_ATTRS) ? "untitled.sym" : "untitled.sch");
-    if(reset_undo) set_modify(0);
+    if(!(reset_undo & 2)) set_modify(0);
   }
 #ifdef XSCHEM_HAS_ROOM
 finish_load:
   if(!xctx->room_document) {
 #endif
   check_collapsing_objects();
-  if(reset_undo && tclgetboolvar("autotrim_wires")) trim_wires();
+  if(!(reset_undo & 8) && tclgetboolvar("autotrim_wires")) trim_wires();
 #ifdef XSCHEM_HAS_ROOM
   }
 #endif
@@ -4223,7 +4236,7 @@ finish_load:
     propagate_hilights(1, 1, XINSERT_NOREPLACE);
   }
   /* set local simulation directory if local_netlist_dir is set*/
-  if(reset_undo) {
+  if(!(reset_undo & 16) ) {
     set_netlist_dir(2, NULL);
     drc_check(-1);
     tcleval("eval_load_file_postprocess");
@@ -4484,11 +4497,13 @@ FILE *open_read_undo_file(const char *name, pid_t *pid_ptr)
 {
   FILE *fd = NULL;
   char diff_name[PATH_MAX + 12];
+  struct stat buf;
   #if HAS_PIPE==1
   int pd[2];
   FILE *diff_fd;
   #endif
 
+  if(stat(name, &buf)) return NULL;
   #if HAS_POPEN==1
   my_snprintf(diff_name, S(diff_name), "gzip -d -c %s", name);
   fd=popen(diff_name, "r");
@@ -4654,8 +4669,6 @@ void pop_undo(int redo, int set_modify_status)
     return;
   }
 
-  clear_drawing();
-  unselect_all(1);
   undo_index = xctx->cur_undo_ptr % (MAX_UNDO - 2) + 2;
   if(redo == 2) {
     undo_index = 0;
@@ -4666,8 +4679,12 @@ void pop_undo(int redo, int set_modify_status)
 
   my_snprintf(diff_name, S(diff_name), "%s/undo%d", xctx->undo_dirname, undo_index);
   if((fd = open_read_undo_file(diff_name, &pid))) {
+    clear_drawing();
+    unselect_all(1);
     read_xschem_file(fd);
     close_undo_file(fd, pid);
+  } else {
+    return; /* undo data not found: do nothing */
   }
 
   if(redo == 5) xctx->cur_undo_ptr++; /* restore undo stack pointer */
@@ -6053,6 +6070,7 @@ int descend_symbol(void)
   xctx->previous_instance[xctx->currsch]=n; /* instance we are descending from */
 
   /* store previous zoom area */
+  xctx->zoom_array[xctx->currsch].schname_hash=str_hash(xctx->current_name);
   xctx->zoom_array[xctx->currsch].x=xctx->xorigin;
   xctx->zoom_array[xctx->currsch].y=xctx->yorigin;
   xctx->zoom_array[xctx->currsch].zoom=xctx->zoom;

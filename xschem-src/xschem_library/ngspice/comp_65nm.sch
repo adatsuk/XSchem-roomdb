@@ -1,4 +1,4 @@
-v {xschem version=3.4.4 file_version=1.2
+v {xschem version=3.4.8RC file_version=1.3
 *
 * This file is part of XSCHEM,
 * a schematic capture and Spice/Vhdl/Verilog netlisting tool for circuit
@@ -23,7 +23,33 @@ G {}
 K {}
 V {}
 S {}
+F {}
 E {}
+B 2 270 -980 1070 -690 {flags=graph
+y1=-0.017
+y2=1.3
+ypos1=0
+ypos2=2
+divy=5
+subdivy=1
+unity=1
+x1=1.23884e-06
+x2=1.33992e-06
+divx=5
+subdivx=1
+dataset=0
+unitx=n
+color="4 12 7"
+node="x1.integ
+vref
+x1.comp"
+smz0=50
+sim_type=tran}
+T {gm=@spice_get_modelparam_gm} 660 -320 0 1 0.2 0.2 {name=M4 layer=7}
+T {gm=@spice_get_modelparam_gm} 520 -320 0 0 0.2 0.2 {name=M3 layer=7}
+T {( @#0:resolved_net )} 1230 -275 0 1 0.2 0.2 {name=p14 layer=15}
+T {( @#0:resolved_net )} 800 -255 0 1 0.2 0.2 {name=p3 layer=15}
+T {( @#0:resolved_net )} 420 -255 0 1 0.2 0.2 {name=p4 layer=15}
 N 590 -150 590 -130 { lab=0}
 N 370 -180 550 -180 { lab=GN1}
 N 330 -230 330 -210 { lab=GN1}
@@ -36,7 +62,7 @@ N 670 -340 670 -300 { lab=#net3}
 N 550 -410 550 -380 { lab=#net2}
 N 510 -380 550 -380 { lab=#net2}
 N 510 -380 510 -340 { lab=#net2}
-N 510 -460 510 -440 { lab=#net4}
+N 510 -460 510 -440 { lab=VCC}
 N 800 -460 800 -400 { lab=VCC}
 N 670 -370 760 -370 { lab=#net3}
 N 330 -210 370 -210 { lab=GN1}
@@ -44,40 +70,47 @@ N 370 -210 370 -180 { lab=GN1}
 N 670 -460 670 -440 { lab=VCC}
 N 550 -410 640 -410 { lab=#net2}
 N 800 -150 800 -130 { lab=0}
-N 800 -340 800 -210 { lab=#net5}
+N 800 -340 800 -210 { lab=#net4}
 N 550 -180 550 -170 { lab=GN1}
 N 550 -170 660 -170 { lab=GN1}
 N 660 -180 660 -170 { lab=GN1}
 N 660 -180 760 -180 { lab=GN1}
 N 670 -380 670 -340 { lab=#net3}
 N 1130 -290 1170 -290 { lab=OUT}
-N 800 -290 870 -290 { lab=#net5}
+N 800 -290 870 -290 { lab=#net4}
 N 980 -150 980 -130 { lab=0}
 N 980 -420 980 -400 { lab=VCC}
-N 940 -370 940 -180 { lab=#net5}
-N 980 -340 980 -210 { lab=#net6}
-N 870 -290 940 -290 { lab=#net5}
+N 940 -370 940 -180 { lab=#net4}
+N 980 -340 980 -210 { lab=#net5}
+N 870 -290 940 -290 { lab=#net4}
 N 1130 -150 1130 -130 { lab=0}
 N 1130 -420 1130 -400 { lab=VCC}
-N 1090 -370 1090 -180 { lab=#net6}
+N 1090 -370 1090 -180 { lab=#net5}
 N 1130 -340 1130 -210 { lab=OUT}
-N 980 -290 1090 -290 { lab=#net6}
-N 990 -620 990 -510 { lab=#net6}
-N 930 -620 930 -510 { lab=#net5}
-N 890 -560 930 -560 { lab=#net5}
-N 890 -560 890 -290 { lab=#net5}
-N 990 -560 1010 -560 { lab=#net6}
-N 1010 -560 1030 -560 { lab=#net6}
-N 1030 -560 1030 -290 { lab=#net6}
-N 960 -660 990 -660 { lab=#net6}
-N 990 -660 990 -620 { lab=#net6}
-N 930 -510 930 -470 { lab=#net5}
-N 930 -470 960 -470 { lab=#net5}
+N 980 -290 1090 -290 { lab=#net5}
+N 990 -620 990 -510 { lab=#net5}
+N 930 -620 930 -510 { lab=#net4}
+N 890 -560 930 -560 { lab=#net4}
+N 890 -560 890 -290 { lab=#net4}
+N 990 -560 1010 -560 { lab=#net5}
+N 1010 -560 1030 -560 { lab=#net5}
+N 1030 -560 1030 -290 { lab=#net5}
+N 960 -660 990 -660 { lab=#net5}
+N 990 -660 990 -620 { lab=#net5}
+N 930 -510 930 -470 { lab=#net4}
+N 930 -470 960 -470 { lab=#net4}
+N 710 -270 740 -270 {lab=PLUS}
+N 440 -270 470 -270 {lab=MINUS}
+N 270 -180 330 -180 {lab=0}
+N 590 -180 630 -180 {lab=0}
+N 800 -180 840 -180 {lab=0}
+N 980 -180 1020 -180 {lab=0}
+N 1130 -180 1170 -180 {lab=0}
 C {nmos4.sym} 570 -180 0 0 {name=M1 model=nmos w=4u l=0.4u m=1}
-C {lab_pin.sym} 590 -180 0 1 {name=p2 lab=0}
+C {lab_pin.sym} 630 -180 0 1 {name=p2 lab=0}
 C {lab_pin.sym} 590 -130 0 0 {name=p6 lab=0}
 C {nmos4.sym} 350 -180 0 1 {name=M2 model=nmos w=4u l=0.4u m=1}
-C {lab_pin.sym} 330 -180 0 0 {name=p7 lab=0}
+C {lab_pin.sym} 270 -180 0 0 {name=p7 lab=0}
 C {isource.sym} 330 -260 0 0 {name=I0 value=30u}
 C {lab_pin.sym} 330 -310 0 0 {name=p9 lab=VCC}
 C {lab_pin.sym} 330 -130 0 0 {name=p16 lab=0}
@@ -95,8 +128,8 @@ C {ipin.sym} 100 -310 0 0 {name=p161 lab=PLUS}
 C {ipin.sym} 100 -260 0 0 {name=p1 lab=MINUS}
 C {opin.sym} 180 -290 0 0 {name=p20 lab=OUT}
 C {title.sym} 160 -30 0 0 {name=l1 author="Stefan Schippers"}
-C {lab_pin.sym} 710 -270 0 1 {name=p3 lab=PLUS}
-C {lab_pin.sym} 470 -270 0 0 {name=p4 lab=MINUS}
+C {lab_pin.sym} 740 -270 0 1 {name=p3 lab=PLUS}
+C {lab_pin.sym} 440 -270 0 0 {name=p4 lab=MINUS}
 C {lab_pin.sym} 1170 -290 0 1 {name=p14 lab=OUT}
 C {pmos4.sym} 780 -370 0 0 {name=M14 model=pmos w=6u l=0.3u m=1}
 C {lab_pin.sym} 800 -370 0 1 {name=p15 lab=VCC}
@@ -104,16 +137,16 @@ C {lab_pin.sym} 800 -460 0 0 {name=p22 lab=VCC}
 C {spice_probe.sym} 420 -180 0 0 {name=p27 attrs=""}
 C {spice_probe.sym} 570 -410 0 0 {name=p28 attrs=""}
 C {nmos4.sym} 780 -180 0 0 {name=M7 model=nmos w=4u l=0.4u m=1}
-C {lab_pin.sym} 800 -180 0 1 {name=p5 lab=0}
+C {lab_pin.sym} 840 -180 0 1 {name=p5 lab=0}
 C {lab_pin.sym} 800 -130 0 1 {name=p8 lab=0}
 C {nmos4.sym} 960 -180 0 0 {name=M8 model=nmos w=1u l=0.4u m=1}
-C {lab_pin.sym} 980 -180 0 1 {name=p10 lab=0}
+C {lab_pin.sym} 1020 -180 0 1 {name=p10 lab=0}
 C {lab_pin.sym} 980 -130 0 1 {name=p11 lab=0}
 C {pmos4.sym} 960 -370 0 0 {name=M9 model=pmos w=2u l=0.4u m=1}
 C {lab_pin.sym} 980 -370 0 1 {name=p12 lab=VCC}
 C {lab_pin.sym} 980 -420 0 0 {name=p13 lab=VCC}
 C {nmos4.sym} 1110 -180 0 0 {name=M10 model=nmos w=1u l=0.4u m=1}
-C {lab_pin.sym} 1130 -180 0 1 {name=p24 lab=0}
+C {lab_pin.sym} 1170 -180 0 1 {name=p24 lab=0}
 C {lab_pin.sym} 1130 -130 0 1 {name=p25 lab=0}
 C {pmos4.sym} 1110 -370 0 0 {name=M11 model=pmos w=2u l=0.4u m=1}
 C {lab_pin.sym} 1130 -370 0 1 {name=p26 lab=VCC}
@@ -127,3 +160,41 @@ C {lab_pin.sym} 960 -620 1 1 {name=p30 lab=0}
 C {spice_probe.sym} 560 -240 0 0 {name=p32 attrs=""}
 C {parax_cap.sym} 390 -170 0 0 {name=C2 gnd=0 value=200f m=1}
 C {vdd.sym} 510 -460 0 0 {name=l3 lab=VCC}
+C {launcher.sym} 150 -590 0 0 {name=h6
+descr="Run top level sim, reload annotation data" 
+tclcommand="
+proc netlist_top \{\} \{
+  global sim netlist_dir
+
+  ## set foreground spice simulation, so `xschem simulate` will wait for it to complete
+  set_sim_defaults ;# populate sim() array
+  set sim(spice,0,fg) 1
+
+  set parent_level1 [expr \{[xschem get currsch] - 1\}]
+  set parent_level2 [expr \{[xschem get currsch] - 2\}]
+
+  ## get instance name of parent instance we descended into:
+  set instname1 [xschem hier_attr $parent_level1 name]
+
+  ## get instance name of parent of parent instance we descended into:
+  set instname2 [xschem hier_attr $parent_level2 name]
+
+  ## go up two levels
+  xschem go_back 
+  xschem go_back 
+
+  ## netlist, simulate, load simulation data 
+  xschem netlist
+  xschem simulate
+  xschem raw_read $netlist_dir/[file rootname [file tail [xschem get current_name]]].raw tran
+  xschem annotate_op
+
+
+  ## descend again
+  xschem descend 1 1 $instname2
+  xschem descend 1 1 $instname1
+\}
+netlist_top
+"
+
+}
