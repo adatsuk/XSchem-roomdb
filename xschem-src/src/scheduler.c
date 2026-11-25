@@ -5881,6 +5881,15 @@ int xschem(ClientData clientdata, Tcl_Interp *interp, int argc, const char * arg
             if(!xctx) {Tcl_SetResult(interp, not_avail, TCL_STATIC); return TCL_ERROR;}
             my_strncpy(xctx->current_name, argv[3], S(xctx->current_name));
           }
+          else if(!strcmp(argv[2], "sch_mtime_sync")) {
+            /* ROOM/LibMan may rewrite /tmp/*.sch on purpose; resync EnterNotify baseline. */
+            struct stat buf;
+            if(!xctx) {Tcl_SetResult(interp, not_avail, TCL_STATIC); return TCL_ERROR;}
+            if(!stat(xctx->sch[xctx->currsch], &buf)) {
+              xctx->time_last_modify = buf.st_mtime;
+              xctx->warn_disk_file_modified = 1;
+            }
+          }
           else if(!strcmp(argv[2], "cursor1_x")) { /* set graph cursor1 position */
             xctx->graph_cursor1_x = atof_spice(argv[3]);
 

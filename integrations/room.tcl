@@ -235,10 +235,28 @@ proc room_temp_sch_path {cell ext} {
 }
 
 proc room_write_sch_data {sch data} {
+  # Skip no-op rewrites: identical content still bumps mtime and makes xschem
+  # pop "Has been changed since opening" on every EnterNotify (LibMan sim path).
+  if {[file exists $sch]} {
+    if {![catch {set ofh [open $sch r]}]} {
+      fconfigure $ofh -translation binary
+      set old [read $ofh]
+      close $ofh
+      if {$old eq $data} {
+        return
+      }
+    }
+  }
   set fh [open $sch w]
   fconfigure $fh -translation binary
   puts -nonewline $fh $data
   close $fh
+  # Re-baseline xschem's disk mtime tracker when we intentionally rewrote the open sch.
+  if {[info commands xschem] ne ""} {
+    if {![catch {set cur [xschem get schname]}] && $cur eq $sch} {
+      catch {xschem set sch_mtime_sync 1}
+    }
+  }
 }
 
 proc room_export_cell_to_sch {roompath cell sch} {
