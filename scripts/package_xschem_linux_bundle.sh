@@ -28,9 +28,21 @@ mkdir -p "$DIST/bin" "$DIST/lib" "$DIST/share" "$DIST/integrations" "$STAGE/lib"
 cp "$BIN" "$DIST/bin/xschem"
 chmod +x "$DIST/bin/xschem"
 cp -a "$ROOMTCL" "$DIST/integrations/roomtcl.so"
-cp -a "$XSCHEM_REPO/integrations/room.tcl" "$DIST/integrations/"
+# room.tcl sources room_lock.tcl; also ship batch rc + primitive symbol cache.
+for _f in room.tcl room_lock.tcl xschem-batch.rc; do
+  if [[ -f "$XSCHEM_REPO/integrations/$_f" ]]; then
+    cp -a "$XSCHEM_REPO/integrations/$_f" "$DIST/integrations/"
+  else
+    echo "WARNING: missing integrations/$_f" >&2
+  fi
+done
+[[ -f "$DIST/integrations/room_lock.tcl" ]] \
+  || { echo "ERROR: integrations/room_lock.tcl is required by room.tcl" >&2; exit 1; }
 if [[ -d "$XSCHEM_REPO/integrations/qucs_symbols" ]]; then
   cp -a "$XSCHEM_REPO/integrations/qucs_symbols" "$DIST/integrations/"
+fi
+if [[ -d "$XSCHEM_REPO/integrations/primitive_cache" ]]; then
+  cp -a "$XSCHEM_REPO/integrations/primitive_cache" "$DIST/integrations/"
 fi
 if [[ -d "$INSTALL_PREFIX/share" ]]; then
   cp -a "$INSTALL_PREFIX/share/." "$DIST/share/"
